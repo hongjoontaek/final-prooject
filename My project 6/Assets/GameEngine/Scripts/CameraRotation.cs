@@ -6,14 +6,14 @@ public class CameraRotation : MonoBehaviour
 {
     [Header("회전 설정")]
     public Transform target; // 카메라가 바라볼 대상 (플레이어) - 사용하지 않지만 추후 활용 가능
-    public float rotationSpeed = 5.0f; // 회전 속도
-
-    [Header("이동 제한")]
-    public float movementLockDuration = 1.5f; // 화면 회전 후 플레이어 이동을 막을 시간
+    public float rotationSpeed = 7.5f; // 회전 속도 (값을 높여서 더 빠르게 수정)
+    public float rotationEndThreshold = 0.1f; // 회전이 끝났다고 판단할 각도 임계값
 
     // 카메라의 현재 시점을 나타내는 열거형
     public enum CameraView { Front, Right, Back, Left }
     public CameraView currentView = CameraView.Front;
+
+    public bool IsRotating { get; private set; } // 외부에서 현재 회전 중인지 확인할 수 있는 프로퍼티
 
     private Quaternion targetRotation; // 목표 회전값
     private Quaternion playerTargetRotation; // 플레이어의 목표 회전값
@@ -57,7 +57,6 @@ public class CameraRotation : MonoBehaviour
             playerTargetRotation *= Quaternion.Euler(0, 90, 0); // 플레이어의 목표 회전값 갱신
             targetRotation *= Quaternion.Euler(0, 90, 0);
             viewIndex = (viewIndex + 1) % 4; // 0, 1, 2, 3 순환
-            playerMovement.DisableMovementForDuration(movementLockDuration);
             UpdateCurrentView();
         }
 
@@ -68,7 +67,6 @@ public class CameraRotation : MonoBehaviour
             targetRotation *= Quaternion.Euler(0, -90, 0);
             viewIndex--;
             if (viewIndex < 0) viewIndex = 3; // 0 -> 3으로 순환
-            playerMovement.DisableMovementForDuration(movementLockDuration);
             UpdateCurrentView();
         }
 
@@ -86,11 +84,25 @@ public class CameraRotation : MonoBehaviour
         // 2. 현재 위치에서 목표 위치로 부드럽게 이동 (Lerp)
         transform.position = Vector3.Lerp(transform.position, desiredPosition, rotationSpeed * Time.deltaTime);
 
-        // 3. 현재 회전값에서 목표 회전값으로 부드럽게 회전 (Slerp)
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
+        // 3. 회전이 거의 끝났는지 확인합니다.
+        if (Quaternion.Angle(transform.rotation, targetRotation) > rotationEndThreshold)
+        {
+            // 아직 회전 중이라면 부드럽게 회전(Slerp)을 계속합니다.
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
+            target.rotation = Quaternion.Slerp(target.rotation, playerTargetRotation, rotationSpeed * Time.deltaTime);
+            IsRotating = true;
+        }
+        else
+        {
+            // 회전이 거의 끝났다면, 목표 각도로 즉시 이동하여 깔끔하게 마무리합니다.
+            if (IsRotating) // 회전이 막 끝난 첫 프레임에만 실행
+            {
+                transform.rotation = targetRotation;
+                target.rotation = playerTargetRotation;
+            }
+            IsRotating = false;
+        }
 
-        // 4. 플레이어도 목표 회전값으로 부드럽게 회전시킵니다.
-        target.rotation = Quaternion.Slerp(target.rotation, playerTargetRotation, rotationSpeed * Time.deltaTime);
     }
 
     // 현재 뷰 상태를 업데이트하고 로그를 출력하는 함수

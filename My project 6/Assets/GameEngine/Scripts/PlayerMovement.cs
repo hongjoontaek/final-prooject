@@ -7,6 +7,9 @@ public class PlayerMovement : MonoBehaviour
     [Header("Movement")]
     public float speed = 5f; // 플레이어 이동 속도
     public float jumpForce = 7f; // 플레이어 점프 힘
+    [Header("Jump Physics")]
+    public float fallMultiplier = 2.5f; // 떨어질 때 적용할 중력 배수 (더 빨리 떨어지게 함)
+    public float lowJumpMultiplier = 2f; // 짧게 점프할 때 적용할 중력 배수
     public LayerMask wallLayer; // 벽으로 인식할 레이어 (차원 접힘 방지용)
 
     [Header("Ground Check")]
@@ -17,7 +20,6 @@ public class PlayerMovement : MonoBehaviour
     private Rigidbody rb; // 플레이어의 Rigidbody 컴포넌트
     private CameraRotation camRotation; // 메인 카메라에 붙어있는 CameraRotation 스크립트 참조
     private bool isGrounded; // 플레이어가 바닥에 닿아있는지 여부
-    private bool canMove = true; // 플레이어가 움직일 수 있는지 여부
     private bool jumpRequested = false; // 점프 요청을 저장할 변수
 
     // 게임 시작 시 1번 호출
@@ -50,7 +52,8 @@ public class PlayerMovement : MonoBehaviour
         Debug.DrawRay(transform.position, Vector3.down * groundCheckDistance, Color.red); 
 
         // 2. 점프 (바닥에 있을 때만 점프 가능)
-        if (Keyboard.current.spaceKey.wasPressedThisFrame && isGrounded)
+        // 카메라가 회전 중이 아닐 때만 점프 입력을 받습니다.
+        if (Keyboard.current.spaceKey.wasPressedThisFrame && isGrounded && !camRotation.IsRotating)
         {
             Debug.Log("점프 입력 감지! (isGrounded: " + isGrounded + ")");
             jumpRequested = true; // 점프 요청을 기록
@@ -146,11 +149,22 @@ public class PlayerMovement : MonoBehaviour
     // 고정된 물리 프레임마다 호출 (물리 계산에 적합)
     void FixedUpdate()
     {
-        // canMove가 false이면 수평 이동을 막고 함수를 종료합니다.
-        if (!canMove)
+        // --- [새로운 로직] One-Way Platform (점프해서 통과하는 발판) 처리 ---
+        // 플레이어가 위로 점프하고 있을 때(Y 속도가 양수일 때) OneWayPlatform과의 충돌을 무시합니다.
+        // 이렇게 하면 발판 아래에서 위로 통과할 수 있습니다.
+        if (rb.linearVelocity.y > 0.1f) // 0.1f의 여유를 두어 미세한 움직임은 무시
         {
-            // 수직 속도(중력, 점프)는 유지하면서 수평 속도만 0으로 만듭니다.
-            rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
+            Physics.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Ground"), true);
+        }
+        else // 플레이어가 떨어지고 있거나 가만히 있을 때
+        {
+            Physics.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Ground"), false);
+        }
+
+        // 카메라가 회전 중일 때는 모든 움직임을 멈추고 함수를 종료합니다.
+        if (camRotation.IsRotating)
+        {
+            rb.linearVelocity = Vector3.zero; // 모든 속도를 0으로 만듭니다.
             return;
         }
 
@@ -266,20 +280,17 @@ public class PlayerMovement : MonoBehaviour
             rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
             jumpRequested = false; // 요청을 처리했으므로 초기화
         }
-    }
 
-    /// <summary>
-    /// 지정된 시간(초) 동안 플레이어의 움직임을 비활성화합니다.
-    /// </summary>
-    /// <param name="duration">움직임을 비활성화할 시간(초)</param>
-    public void DisableMovementForDuration(float duration)
-    {
-        StartCoroutine(DisableMovementCoroutine(duration));
-    }
-
-    private System.Collections.IEnumerator DisableMovementCoroutine(float duration) {
-        canMove = false;
-        yield return new WaitForSeconds(duration);
-        canMove = true;
+        // --- [새로운 로직] 더 나은 점프 물리를 위한 처리 ---
+        // 1. 떨어질 때 더 빨리 떨어지도록 중력을 강화합니다.
+        if (rb.linearVelocity.y < 0)
+        {
+            rb.linearVelocity += Vector3.up * Physics.gravity.y * (fallMultiplier - 1) * Time.deltaTime;
+        }
+        // 2. 점프 키를 짧게 누르면 점프 높이가 낮아지도록 합니다.
+        else if (rb.linearVelocity.y > 0 && !Keyboard.current.spaceKey.isPressed)
+        {
+            rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.deltaTime;
+        }
     }
 }
