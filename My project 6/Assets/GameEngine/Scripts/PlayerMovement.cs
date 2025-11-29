@@ -8,7 +8,7 @@ public class PlayerMovement : MonoBehaviour
     public float speed = 5f; // 플레이어 이동 속도
     public float jumpForce = 7f; // 플레이어 점프 힘
     [Header("Jump Physics")]
-    public float fallMultiplier = 2.5f; // 떨어질 때 적용할 중력 배수 (더 빨리 떨어지게 함)
+    public float fallMultiplier = 2f; // 떨어질 때 적용할 중력 배수 (더 빨리 떨어지게 함)
     public float lowJumpMultiplier = 2f; // 짧게 점프할 때 적용할 중력 배수
     public LayerMask wallLayer; // 벽으로 인식할 레이어 (차원 접힘 방지용)
 
@@ -17,10 +17,19 @@ public class PlayerMovement : MonoBehaviour
     public float dimensionFoldDepth = 50f; // 차원 접힘을 감지할 깊이
     public float groundCheckDistance = 1.1f; // 바닥 체크를 위한 레이캐스트 거리
 
+    [Header("Ledge Grab")]
+    public Vector3 ledgeCheckOffset = new Vector3(0, 1.5f, 0); // 벽을 감지할 레이캐스트 시작 위치 (머리 근처)
+    public float ledgeCheckDistance = 0.6f; // 벽을 감지할 거리
+    public float ledgeTopCheckDistance = 1.2f; // 벽 위 바닥을 감지할 레이캐스트 거리
+    public Vector3 climbOffset = new Vector3(0, 0.8f, 0.6f); // 올라간 후 위치 보정값
+    private bool isClimbing = false; // 현재 벽을 오르는 중인지 상태를 저장할 변수
+
     private Rigidbody rb; // 플레이어의 Rigidbody 컴포넌트
     private CameraRotation camRotation; // 메인 카메라에 붙어있는 CameraRotation 스크립트 참조
     private bool isGrounded; // 플레이어가 바닥에 닿아있는지 여부
     private bool jumpRequested = false; // 점프 요청을 저장할 변수
+    private bool dropRequested = false; // 아래로 내려가기 요청을 저장할 변수
+    private bool isDropping = false; // 현재 아래로 내려가는 중인지 상태를 저장할 변수
 
     // 게임 시작 시 1번 호출
     void Start()
@@ -46,24 +55,55 @@ public class PlayerMovement : MonoBehaviour
     // 매 프레임마다 호출 (주로 입력 감지 및 논리 처리)
     void Update()
     {
+        // 벽 오르기 중에는 다른 모든 로직을 무시합니다.
+        if (isClimbing)
+        {
+            return;
+        }
+
         // 1. 바닥 체크 로직 호출 (기본 체크 및 차원 접힘 체크 포함)
         CheckGrounded(); // 새로운 바닥 체크 함수 호출
         // (확인용) Scene 뷰에 빨간색 레이저를 그려 바닥 체크가 어디서 이루어지는지 시각적으로 보여줍니다.
         Debug.DrawRay(transform.position, Vector3.down * groundCheckDistance, Color.red); 
 
         // 2. 점프 (바닥에 있을 때만 점프 가능)
+        bool isDownPressed = Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed;
+
         // 카메라가 회전 중이 아닐 때만 점프 입력을 받습니다.
         if (Keyboard.current.spaceKey.wasPressedThisFrame && isGrounded && !camRotation.IsRotating)
         {
-            Debug.Log("점프 입력 감지! (isGrounded: " + isGrounded + ")");
-            jumpRequested = true; // 점프 요청을 기록
+            // [로그 1] 점프 입력이 들어왔을 때, 아래 키가 눌렸는지 확인합니다.
+            Debug.Log($"[입력 감지] 점프 시도! isDownPressed: {isDownPressed}");
+
+            // 아래 방향키를 누르고 점프하면 '아래로 내려가기' 요청
+            if (isDownPressed)
+            {
+                dropRequested = true;
+                Debug.Log("<color=orange>[요청] 아래로 내려가기(dropRequested)가 true로 설정됨.</color>");
+            }
+            else // 그렇지 않으면 일반 점프 요청
+            {
+                Debug.Log("점프 입력 감지! (isGrounded: " + isGrounded + ")");
+                jumpRequested = true; // 점프 요청을 기록
+            }
         }
+
+        // 3. 벽 잡기 체크 (공중에 있고, 위로 올라가는 중일 때만)
+        CheckLedge();
     }
 
      private void CheckGrounded()
      {
+         // [수정] 아래로 내려가는 중에는 바닥 체크 로직을 실행하지 않습니다.
+         // 이렇게 해야 CheckGrounded가 플레이어를 다시 위로 끌어올리는 것을 막을 수 있습니다.
+         if (isDropping)
+         {
+             isGrounded = false;
+             return;
+         }
          // 1. 기본 바닥 체크 (플레이어 바로 아래)
-         if (Physics.Raycast(transform.position, Vector3.down, groundCheckDistance, groundLayer))
+         bool basicHit = Physics.Raycast(transform.position, Vector3.down, groundCheckDistance, groundLayer);
+         if (basicHit)
          {
              isGrounded = true;
              return;
@@ -149,16 +189,35 @@ public class PlayerMovement : MonoBehaviour
     // 고정된 물리 프레임마다 호출 (물리 계산에 적합)
     void FixedUpdate()
     {
-        // --- [새로운 로직] One-Way Platform (점프해서 통과하는 발판) 처리 ---
-        // 플레이어가 위로 점프하고 있을 때(Y 속도가 양수일 때) OneWayPlatform과의 충돌을 무시합니다.
-        // 이렇게 하면 발판 아래에서 위로 통과할 수 있습니다.
-        if (rb.linearVelocity.y > 0.1f) // 0.1f의 여유를 두어 미세한 움직임은 무시
+        // 벽 오르기 중에는 물리 계산을 무시합니다.
+        if (isClimbing)
         {
-            Physics.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Ground"), true);
+            return;
         }
-        else // 플레이어가 떨어지고 있거나 가만히 있을 때
+
+        // --- [수정된 로직] One-Way Platform 처리 ---
+        // 아래로 내려가는 중이 아닐 때만, 위로 점프해서 발판을 통과할 수 있도록 합니다.
+        if (!dropRequested)
         {
-            Physics.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Ground"), false);
+            // [로그 2-A] 이 로그가 계속 보인다면, dropRequested가 true로 설정되지 않았거나 이미 처리된 후입니다.
+            // Debug.Log("[FixedUpdate] 일반 충돌 처리 실행 중 (dropRequested == false)");
+
+            // 플레이어가 위로 점프하고 있을 때(Y 속도가 양수일 때) Ground와의 충돌을 무시합니다.
+            if (rb.linearVelocity.y > 0.1f)
+            {
+                Physics.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Ground"), true);
+            }
+            else // 플레이어가 떨어지고 있거나 가만히 있을 때 충돌을 다시 활성화합니다.
+            {
+                Physics.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Ground"), false);
+            }
+        }
+        else // 아래로 내려가기 요청이 들어왔을 때
+        {
+            // [로그 2-B] 이 로그가 보인다면, FixedUpdate가 dropRequested를 성공적으로 감지한 것입니다.
+            Debug.Log("<color=yellow>[FixedUpdate] 아래로 내려가기 처리 시작!</color>");
+            TeleportDown(); // 순간이동 방식으로 아래로 내려갑니다.
+            dropRequested = false; // 요청을 처리했으므로 초기화
         }
 
         // 카메라가 회전 중일 때는 모든 움직임을 멈추고 함수를 종료합니다.
@@ -244,7 +303,9 @@ public class PlayerMovement : MonoBehaviour
 
                     if (!Physics.Raycast(rayStart, direction, distance, wallLayer)) // 벽에 안가려졌다면
                     {
-                        float distToCam = Vector3.Distance(targetPos, camRotation.transform.position);
+                        // BoxCast의 충돌 지점과 카메라의 거리를 계산합니다.
+                        float distToCam = Vector3.Distance(hit.point, camRotation.transform.position);
+
                         if (distToCam < closestDist) // 현재 위치보다 카메라에 더 가깝다면
                         {
                             closestDist = distToCam;
@@ -293,4 +354,152 @@ public class PlayerMovement : MonoBehaviour
             rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.deltaTime;
         }
     }
+
+    /// <summary>
+    /// [새로운 방식] 플레이어를 카메라 방향으로 1만큼 순간이동시켜 발판에서 벗어나게 합니다.
+    /// </summary>
+    private void TeleportDown()
+    {
+        // 발판 자동 붙이기 기능을 잠시 끄는 코루틴을 시작합니다.
+        StartCoroutine(DisableSnappingForDuration(1f));
+
+        // 1. 플레이어 위치에서 카메라 위치를 향하는 방향 벡터를 계산합니다.
+        Vector3 directionToCamera = camRotation.transform.position - transform.position;
+        // 2. Y축(높이) 값은 무시하여 수평 방향만 남깁니다.
+        directionToCamera.y = 0;
+        // 3. 방향 벡터를 정규화(normalize)하여 순수한 방향(길이 1)으로 만듭니다.
+        Vector3 teleportDirection = directionToCamera.normalized;
+
+        // 4. [새로운 로직] 현재 밟고 있는 발판을 찾아 그 경계까지의 거리를 계산합니다.
+        float teleportDistance = 1f; // 기본 이동 거리 (발판을 못 찾을 경우 대비)
+        RaycastHit groundHit;
+        // 플레이어 발밑으로 레이를 쏴서 현재 서 있는 발판을 찾습니다.
+        if (Physics.Raycast(transform.position, Vector3.down, out groundHit, groundCheckDistance, groundLayer))
+        {
+            Collider groundCollider = groundHit.collider;
+            Bounds groundBounds = groundCollider.bounds;
+
+            // 플레이어 위치에서 발판 경계까지의 거리를 계산합니다.
+            // Dot product를 사용하여 특정 방향으로의 거리를 구합니다.
+            float distanceToEdge = Vector3.Dot(groundBounds.extents, teleportDirection.Abs());
+            float distanceOfPlayerFromCenter = Vector3.Dot(transform.position - groundBounds.center, teleportDirection);
+
+            // 최종 이동 거리 = (경계까지 거리 - 중심에서 플레이어까지 거리) + 약간의 여유
+            teleportDistance = distanceToEdge - distanceOfPlayerFromCenter + 0.1f;
+        }
+
+        // 계산된 위치로 플레이어를 순간이동시킵니다.
+        transform.position += teleportDirection * teleportDistance;
+        Debug.Log($"<color=cyan>[순간이동] {transform.position} 위치로 이동!</color>");
+    }
+
+    /// <summary>
+    /// 지정된 시간 동안만 발판 자동 붙이기 기능을 비활성화하는 코루틴입니다.
+    /// </summary>
+    /// <param name="duration">비활성화할 시간(초)</param>
+    private System.Collections.IEnumerator DisableSnappingForDuration(float duration)
+    {
+        isDropping = true; // '내려가는 중' 상태를 활성화
+        // 지정된 시간만큼 대기
+        yield return new WaitForSeconds(duration);
+        // '내려가는 중' 상태를 비활성화하여 모든 자동 붙이기 기능을 다시 켭니다.
+        isDropping = false;
+
+        // (디버그용) 기능이 다시 활성화되었음을 알림
+        Debug.Log("<color=green>발판 자동 붙이기 기능 다시 활성화.</color>");
+    }
+
+    /// <summary>
+    /// [새로운 기능] 벽을 잡고 올라갈 수 있는지 확인합니다.
+    /// </summary>
+    private void CheckLedge()
+    {
+        // 땅에 있거나, 아래로 떨어지는 중이거나, 아래로 내려가기 중에는 실행하지 않음
+        if (isGrounded || rb.linearVelocity.y <= 0 || isDropping)
+        {
+            return;
+        }
+
+        // 1. 플레이어 앞 방향 결정
+        Vector3 forwardDirection = GetForwardDirection();
+
+        // 2. 벽 감지: 플레이어 머리 근처에서 앞으로 레이캐스트
+        RaycastHit wallHit;
+        bool wallCheck = Physics.Raycast(transform.position + ledgeCheckOffset, forwardDirection, out wallHit, ledgeCheckDistance, groundLayer);
+
+        if (wallCheck)
+        {
+            // 3. 벽 위 공간 감지: 벽 바로 위가 비어있는지 확인
+            Vector3 aboveWallPoint = new Vector3(wallHit.point.x, transform.position.y + ledgeCheckOffset.y, wallHit.point.z);
+            bool headClearCheck = !Physics.Raycast(aboveWallPoint, forwardDirection, ledgeCheckDistance, groundLayer);
+
+            if (headClearCheck)
+            {
+                // 4. 올라갈 바닥 감지: 벽 위에서 아래로 레이캐스트
+                RaycastHit ledgeHit;
+                Vector3 ledgeCheckStart = wallHit.point + forwardDirection * 0.1f + Vector3.up * ledgeTopCheckDistance;
+                bool ledgeCheck = Physics.Raycast(ledgeCheckStart, Vector3.down, out ledgeHit, ledgeTopCheckDistance, groundLayer);
+
+                if (ledgeCheck)
+                {
+                    // 모든 조건 충족! 벽 오르기 시작
+                    StartCoroutine(ClimbLedge(ledgeHit.point, forwardDirection));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// [새로운 기능] 실제로 벽을 오르는 동작을 처리하는 코루틴입니다.
+    /// </summary>
+    private System.Collections.IEnumerator ClimbLedge(Vector3 targetPosition, Vector3 forwardDirection)
+    {
+        isClimbing = true;
+        rb.isKinematic = true; // 물리 엔진의 영향을 받지 않도록 설정
+        rb.linearVelocity = Vector3.zero;
+
+        Debug.Log("<color=lightblue>벽 오르기 시작!</color>");
+
+        // 여기에 "벽 잡는 애니메이션" 트리거를 넣으면 됩니다.
+        // 예: animator.SetTrigger("GrabLedge");
+
+        // 부드럽게 벽에 붙는 과정 (선택 사항)
+        Vector3 startPos = transform.position;
+        Vector3 grabPos = new Vector3(targetPosition.x - forwardDirection.x * climbOffset.z, targetPosition.y - climbOffset.y, targetPosition.z - forwardDirection.z * climbOffset.z);
+        float t = 0;
+        while (t < 0.2f)
+        {
+            transform.position = Vector3.Lerp(startPos, grabPos, t / 0.2f);
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        // 여기에 "벽 위로 올라가는 애니메이션" 트리거를 넣으면 됩니다.
+        // 예: animator.SetTrigger("ClimbUp");
+        yield return new WaitForSeconds(0.8f); // 애니메이션 길이에 맞춰 대기 (임시)
+
+        // 최종 위치로 이동
+        transform.position = new Vector3(targetPosition.x, targetPosition.y, targetPosition.z);
+
+        isClimbing = false;
+        rb.isKinematic = false; // 다시 물리 엔진의 영향을 받도록 설정
+
+        Debug.Log("<color=lightblue>벽 오르기 완료!</color>");
+    }
+
+    // 현재 카메라 뷰에 따른 '앞' 방향을 반환하는 헬퍼 함수
+    private Vector3 GetForwardDirection()
+    {
+        if (camRotation.currentView == CameraRotation.CameraView.Front) return Vector3.forward;
+        if (camRotation.currentView == CameraRotation.CameraView.Back) return Vector3.back;
+        if (camRotation.currentView == CameraRotation.CameraView.Right) return Vector3.right;
+        if (camRotation.currentView == CameraRotation.CameraView.Left) return Vector3.left;
+        return transform.forward;
+    }
+}
+
+// Vector3의 각 요소를 절대값으로 만드는 확장 메서드
+public static class Vector3Extensions
+{
+    public static Vector3 Abs(this Vector3 v) => new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
 }
