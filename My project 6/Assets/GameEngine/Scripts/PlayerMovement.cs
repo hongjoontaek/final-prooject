@@ -24,12 +24,20 @@ public class PlayerMovement : MonoBehaviour
     public Vector3 climbOffset = new Vector3(0, 0.8f, 0.6f); // 올라간 후 위치 보정값
     private bool isClimbing = false; // 현재 벽을 오르는 중인지 상태를 저장할 변수
 
+    [Header("Visibility")]
+    public Material silhouetteMaterial; // 벽 뒤에 있을 때 사용할 실루엣 머티리얼
+    public Transform visibilityCheckTarget; // 가려졌는지 확인할 플레이어의 부위 (보통 머리나 몸통 중앙)
+    private Material normalMaterial; // 플레이어의 원래 머티리얼
+    private Renderer playerRenderer; // 플레이어 모델의 Renderer 컴포넌트
+
     private Rigidbody rb; // 플레이어의 Rigidbody 컴포넌트
     private CameraRotation camRotation; // 메인 카메라에 붙어있는 CameraRotation 스크립트 참조
     private bool isGrounded; // 플레이어가 바닥에 닿아있는지 여부
     private bool jumpRequested = false; // 점프 요청을 저장할 변수
     private bool dropRequested = false; // 아래로 내려가기 요청을 저장할 변수
     private bool isDropping = false; // 현재 아래로 내려가는 중인지 상태를 저장할 변수
+    private bool isSilhouetteMode = false; // 현재 실루엣 모드인지 상태를 저장
+    private bool wasCameraRotating = false; // 이전 프레임에서 카메라가 회전 중이었는지 확인
 
     // 게임 시작 시 1번 호출
     void Start()
@@ -47,6 +55,20 @@ public class PlayerMovement : MonoBehaviour
         //    이 스크립트의 currentView 값을 사용하여 플레이어 이동 방향을 결정합니다.
         camRotation = Camera.main.GetComponent<CameraRotation>();
 
+        // 3. [새로운 기능] 플레이어의 렌더러와 원래 머티리얼을 가져옵니다.
+        playerRenderer = GetComponentInChildren<Renderer>();
+        if (playerRenderer != null)
+        {
+            normalMaterial = playerRenderer.material;
+        }
+        else
+        {
+            Debug.LogError("플레이어 모델의 Renderer를 찾을 수 없습니다! 자식 오브젝트에 모델이 있는지 확인해주세요.");
+        }
+        // visibilityCheckTarget이 설정되지 않았다면, 플레이어 자기 자신을 타겟으로 설정합니다.
+        if (visibilityCheckTarget == null)
+            visibilityCheckTarget = transform;
+
         // 3. 게임 플레이 시 마우스 커서를 숨기고 중앙에 고정
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
@@ -55,6 +77,9 @@ public class PlayerMovement : MonoBehaviour
     // 매 프레임마다 호출 (주로 입력 감지 및 논리 처리)
     void Update()
     {
+        // [새로운 기능] 플레이어가 벽에 가려졌는지 확인하고 머티리얼을 교체합니다.
+        HandleVisibility();
+
         // 벽 오르기 중에는 다른 모든 로직을 무시합니다.
         if (isClimbing)
         {
@@ -149,7 +174,14 @@ public class PlayerMovement : MonoBehaviour
              float distance = Vector3.Distance(rayStart, targetPos);
              Vector3 direction = (targetPos - rayStart).normalized;
  
-             if (!Physics.Raycast(rayStart, direction, distance, wallLayer))
+             // [수정] 벽 검사를 2단계로 강화합니다.
+             // 1. 플레이어와 목표 지점 사이에 벽이 없는지 확인합니다.
+             bool isPathClear = !Physics.Raycast(rayStart, direction, distance, wallLayer);
+ 
+             // 2. 카메라와 목표 지점 사이에 벽이 없는지 확인합니다. (시각적으로 가려지지 않았는지)
+             bool isVisuallyClear = !Physics.Raycast(camRotation.transform.position, (targetPos - camRotation.transform.position).normalized, Vector3.Distance(camRotation.transform.position, targetPos), wallLayer);
+ 
+             if (isPathClear && isVisuallyClear)
              {
                  validHits.Add(hit);
              }
@@ -301,7 +333,14 @@ public class PlayerMovement : MonoBehaviour
                     float distance = Vector3.Distance(rayStart, targetPos);
                     Vector3 direction = (targetPos - rayStart).normalized;
 
-                    if (!Physics.Raycast(rayStart, direction, distance, wallLayer)) // 벽에 안가려졌다면
+                    // [수정] 벽 검사를 2단계로 강화합니다.
+                    // 1. 플레이어와 목표 지점 사이에 벽이 없는지 확인합니다.
+                    bool isPathClear = !Physics.Raycast(rayStart, direction, distance, wallLayer);
+
+                    // 2. 카메라와 목표 지점 사이에 벽이 없는지 확인합니다. (시각적으로 가려지지 않았는지)
+                    bool isVisuallyClear = !Physics.Raycast(camRotation.transform.position, (targetPos - camRotation.transform.position).normalized, Vector3.Distance(camRotation.transform.position, targetPos), wallLayer);
+
+                    if (isPathClear && isVisuallyClear) // 두 조건 모두 만족해야 유효한 발판
                     {
                         // BoxCast의 충돌 지점과 카메라의 거리를 계산합니다.
                         float distToCam = Vector3.Distance(hit.point, camRotation.transform.position);
@@ -495,6 +534,68 @@ public class PlayerMovement : MonoBehaviour
         if (camRotation.currentView == CameraRotation.CameraView.Right) return Vector3.right;
         if (camRotation.currentView == CameraRotation.CameraView.Left) return Vector3.left;
         return transform.forward;
+    }
+    
+    /// <summary>
+    /// [새로운 기능] 플레이어가 벽에 가려졌는지 확인하고, 그에 따라 머티리얼을 교체합니다.
+    /// [수정된 로직] 카메라 회전이 끝났을 때만 실루엣 모드를 켜고, 플레이어가 벽 뒤에서 나왔을 때 끕니다.
+    /// </summary>
+    private void HandleVisibility()
+    {
+        if (playerRenderer == null || silhouetteMaterial == null)
+            return;
+
+        bool isCameraRotatingNow = camRotation.IsRotating;
+
+        // 1. 카메라 회전이 '끝나는' 시점을 감지합니다.
+        if (wasCameraRotating && !isCameraRotatingNow)
+        {
+            // 회전이 끝난 직후, 플레이어가 벽 뒤에 있는지 확인합니다.
+            if (IsPlayerObscured())
+            {
+                isSilhouetteMode = true; // 실루엣 모드를 켭니다.
+            }
+            else
+            {
+                isSilhouetteMode = false; // 실루엣 모드를 끕니다.
+            }
+        }
+
+        // 2. 실루엣 모드일 때, 플레이어가 벽 뒤에서 '나왔는지' 확인합니다.
+        if (isSilhouetteMode)
+        {
+            if (!IsPlayerObscured())
+            {
+                isSilhouetteMode = false; // 벽 뒤에서 나왔으므로 실루엣 모드를 끕니다.
+            }
+        }
+
+        // 3. 최종 'isSilhouetteMode' 상태에 따라 머티리얼을 적용합니다.
+        if (isSilhouetteMode)
+        {
+            playerRenderer.material = silhouetteMaterial;
+        }
+        else
+        {
+            playerRenderer.material = normalMaterial;
+        }
+
+        // 다음 프레임을 위해 현재 카메라 회전 상태를 저장합니다.
+        wasCameraRotating = isCameraRotatingNow;
+    }
+
+    // 플레이어가 벽에 가려졌는지 확인하는 헬퍼 함수
+    private bool IsPlayerObscured()
+    {
+        Vector3 direction = visibilityCheckTarget.position - camRotation.transform.position;
+        float playerDistance = direction.magnitude;
+        RaycastHit hit;
+        if (Physics.Raycast(camRotation.transform.position, direction, out hit, playerDistance, wallLayer))
+        {
+            // 벽이 플레이어보다 가까이 있을 때만 가려진 것으로 판단
+            return hit.distance < playerDistance - 0.1f;
+        }
+        return false;
     }
 }
 

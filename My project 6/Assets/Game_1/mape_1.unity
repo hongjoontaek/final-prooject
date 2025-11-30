@@ -701,7 +701,7 @@ Transform:
   m_GameObject: {fileID: 138974251}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 21.65, z: 0}
+  m_LocalPosition: {x: 0, y: 7.28, z: 0}
   m_LocalScale: {x: 0.5, y: 5, z: 0.5}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -6517,6 +6517,10 @@ MonoBehaviour:
     m_Bits: 64
   dimensionFoldDepth: 50
   groundCheckDistance: 1.1
+  ledgeCheckOffset: {x: 0, y: 1.5, z: 0}
+  ledgeCheckDistance: 0.6
+  ledgeTopCheckDistance: 1.2
+  climbOffset: {x: 0, y: 0.8, z: 0.6}
 --- !u!114 &1521628749
 MonoBehaviour:
   m_ObjectHideFlags: 0
