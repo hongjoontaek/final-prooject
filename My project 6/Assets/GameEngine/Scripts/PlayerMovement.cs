@@ -170,18 +170,29 @@ public class PlayerMovement : MonoBehaviour
              else
                  targetPos.x = hit.point.x;
  
+             // [새로운 기능] 너무 먼 거리는 순간이동 후보에서 제외합니다.
+             float distanceToTarget = Vector3.Distance(transform.position, hit.point);
+             if (distanceToTarget > 100f)
+             {
+                 continue; // 거리가 50 이상이면 이 발판은 무시하고 다음 발판을 확인합니다.
+             }
+ 
              Vector3 rayStart = transform.position - (targetPos - transform.position).normalized * 0.5f;
              float distance = Vector3.Distance(rayStart, targetPos);
              Vector3 direction = (targetPos - rayStart).normalized;
  
-             // [수정] 벽 검사를 2단계로 강화합니다.
-             // 1. 플레이어와 목표 지점 사이에 벽이 없는지 확인합니다.
-             bool isPathClear = !Physics.Raycast(rayStart, direction, distance, wallLayer);
+             // [수정] 벽 검사 로직을 더 유연하게 변경합니다.
+             // 1. 목표 발판이 카메라 시점에서 벽 뒤에 숨겨져 있는지 확인합니다.
+             RaycastHit wallHit;
+             bool isVisuallyObscured = Physics.Raycast(camRotation.transform.position, (targetPos - camRotation.transform.position).normalized, out wallHit, Vector3.Distance(camRotation.transform.position, targetPos), wallLayer);
  
-             // 2. 카메라와 목표 지점 사이에 벽이 없는지 확인합니다. (시각적으로 가려지지 않았는지)
-             bool isVisuallyClear = !Physics.Raycast(camRotation.transform.position, (targetPos - camRotation.transform.position).normalized, Vector3.Distance(camRotation.transform.position, targetPos), wallLayer);
- 
-             if (isPathClear && isVisuallyClear)
+             // 2. 만약 시각적으로 가려졌다면, 그 벽이 목표 발판보다 '뒤에' 있는지 확인합니다.
+             //    즉, 목표 발판이 벽보다 앞에 있다면 괜찮습니다.
+             if (isVisuallyObscured && wallHit.distance < Vector3.Distance(camRotation.transform.position, targetPos))
+             {
+                 // 목표 발판이 벽 뒤에 있으므로, 유효하지 않음.
+             }
+             else
              {
                  validHits.Add(hit);
              }
@@ -329,18 +340,29 @@ public class PlayerMovement : MonoBehaviour
                     else
                         targetPos.x = hit.point.x;
 
+                    // [새로운 기능] 너무 먼 거리는 순간이동 후보에서 제외합니다.
+                    float distanceToTarget = Vector3.Distance(transform.position, hit.point);
+                    if (distanceToTarget > 50f)
+                    {
+                        continue; // 거리가 50 이상이면 이 발판은 무시하고 다음 발판을 확인합니다.
+                    }
+
                     Vector3 rayStart = transform.position - (targetPos - transform.position).normalized * 0.5f;
                     float distance = Vector3.Distance(rayStart, targetPos);
                     Vector3 direction = (targetPos - rayStart).normalized;
 
-                    // [수정] 벽 검사를 2단계로 강화합니다.
-                    // 1. 플레이어와 목표 지점 사이에 벽이 없는지 확인합니다.
-                    bool isPathClear = !Physics.Raycast(rayStart, direction, distance, wallLayer);
+                    // [수정] 벽 검사 로직을 더 유연하게 변경합니다.
+                    // 1. 목표 발판이 카메라 시점에서 벽 뒤에 숨겨져 있는지 확인합니다.
+                    RaycastHit wallHit;
+                    bool isVisuallyObscured = Physics.Raycast(camRotation.transform.position, (targetPos - camRotation.transform.position).normalized, out wallHit, Vector3.Distance(camRotation.transform.position, targetPos), wallLayer);
 
-                    // 2. 카메라와 목표 지점 사이에 벽이 없는지 확인합니다. (시각적으로 가려지지 않았는지)
-                    bool isVisuallyClear = !Physics.Raycast(camRotation.transform.position, (targetPos - camRotation.transform.position).normalized, Vector3.Distance(camRotation.transform.position, targetPos), wallLayer);
-
-                    if (isPathClear && isVisuallyClear) // 두 조건 모두 만족해야 유효한 발판
+                    // 2. 만약 시각적으로 가려졌다면, 그 벽이 목표 발판보다 '뒤에' 있는지 확인합니다.
+                    //    즉, 목표 발판이 벽보다 앞에 있다면 괜찮습니다.
+                    if (isVisuallyObscured && wallHit.distance < Vector3.Distance(camRotation.transform.position, targetPos))
+                    {
+                        // 목표 발판이 벽 뒤에 있으므로, 유효하지 않음.
+                    }
+                    else
                     {
                         // BoxCast의 충돌 지점과 카메라의 거리를 계산합니다.
                         float distToCam = Vector3.Distance(hit.point, camRotation.transform.position);
@@ -542,7 +564,7 @@ public class PlayerMovement : MonoBehaviour
     /// </summary>
     private void HandleVisibility()
     {
-        if (playerRenderer == null || silhouetteMaterial == null)
+        if (playerRenderer == null || silhouetteMaterial == null || normalMaterial == null)
             return;
 
         bool isCameraRotatingNow = camRotation.IsRotating;
@@ -550,15 +572,7 @@ public class PlayerMovement : MonoBehaviour
         // 1. 카메라 회전이 '끝나는' 시점을 감지합니다.
         if (wasCameraRotating && !isCameraRotatingNow)
         {
-            // 회전이 끝난 직후, 플레이어가 벽 뒤에 있는지 확인합니다.
-            if (IsPlayerObscured())
-            {
-                isSilhouetteMode = true; // 실루엣 모드를 켭니다.
-            }
-            else
-            {
-                isSilhouetteMode = false; // 실루엣 모드를 끕니다.
-            }
+            isSilhouetteMode = IsPlayerObscured();
         }
 
         // 2. 실루엣 모드일 때, 플레이어가 벽 뒤에서 '나왔는지' 확인합니다.
@@ -585,17 +599,17 @@ public class PlayerMovement : MonoBehaviour
     }
 
     // 플레이어가 벽에 가려졌는지 확인하는 헬퍼 함수
+    /// <summary>
+    /// 플레이어가 벽에 가려졌는지 확인하는 헬퍼 함수
+    /// </summary>
+    /// <returns>가려졌으면 true, 아니면 false</returns>
     private bool IsPlayerObscured()
     {
         Vector3 direction = visibilityCheckTarget.position - camRotation.transform.position;
         float playerDistance = direction.magnitude;
-        RaycastHit hit;
-        if (Physics.Raycast(camRotation.transform.position, direction, out hit, playerDistance, wallLayer))
-        {
-            // 벽이 플레이어보다 가까이 있을 때만 가려진 것으로 판단
-            return hit.distance < playerDistance - 0.1f;
-        }
-        return false;
+
+        // 카메라와 플레이어 사이에 Wall이 있는지 단순하게 확인합니다.
+        return Physics.Raycast(camRotation.transform.position, direction, playerDistance, wallLayer);
     }
 }
 
