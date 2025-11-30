@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using TMPro; // TextMeshPro를 사용하기 위해 이 줄을 추가합니다.
 
 // MonoBehaviour를 상속받습니다.
 public class PlayerMovement : MonoBehaviour
@@ -30,6 +31,17 @@ public class PlayerMovement : MonoBehaviour
     private Material normalMaterial; // 플레이어의 원래 머티리얼
     private Renderer playerRenderer; // 플레이어 모델의 Renderer 컴포넌트
 
+    [Header("Fall Damage")]
+    public float deathYLevel = 30f; // 이 Y축 높이 이하로 떨어지면 사망 처리
+    public float maxTeleportDistance = 50f; // 자동 붙이기 기능의 최대 순간이동 거리
+
+    [Header("Interaction")]
+    public GameObject interactionPromptUI; // "Z키를 눌러 읽기" UI 오브젝트
+    public TextMeshProUGUI narrationTextUI; // [수정] TextMeshPro 텍스트를 받도록 변경
+    public GameObject narrationPanelUI; // 나레이션 텍스트를 담고 있는 패널
+    private InteractableSign currentInteractable; // 현재 상호작용 가능한 오브젝트
+    private bool isReading = false; // 현재 나레이션을 읽고 있는지 상태
+
     private Rigidbody rb; // 플레이어의 Rigidbody 컴포넌트
     private CameraRotation camRotation; // 메인 카메라에 붙어있는 CameraRotation 스크립트 참조
     private bool isGrounded; // 플레이어가 바닥에 닿아있는지 여부
@@ -37,6 +49,7 @@ public class PlayerMovement : MonoBehaviour
     private bool dropRequested = false; // 아래로 내려가기 요청을 저장할 변수
     private bool isDropping = false; // 현재 아래로 내려가는 중인지 상태를 저장할 변수
     private bool isSilhouetteMode = false; // 현재 실루엣 모드인지 상태를 저장
+    private Vector3 initialPosition; // 초기 스폰 위치를 저장할 변수
     private bool wasCameraRotating = false; // 이전 프레임에서 카메라가 회전 중이었는지 확인
 
     // 게임 시작 시 1번 호출
@@ -72,16 +85,28 @@ public class PlayerMovement : MonoBehaviour
         // 3. 게임 플레이 시 마우스 커서를 숨기고 중앙에 고정
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+
+        // 4. [새로운 기능] 초기 위치 저장
+        initialPosition = transform.position;
     }
 
     // 매 프레임마다 호출 (주로 입력 감지 및 논리 처리)
     void Update()
     {
+        // [새로운 기능] 상호작용 처리
+        HandleInteraction();
+
         // [새로운 기능] 플레이어가 벽에 가려졌는지 확인하고 머티리얼을 교체합니다.
         HandleVisibility();
 
         // 벽 오르기 중에는 다른 모든 로직을 무시합니다.
         if (isClimbing)
+        {
+            return;
+        }
+
+        // 나레이션을 읽는 중에는 다른 모든 입력을 무시합니다.
+        if (isReading)
         {
             return;
         }
@@ -115,6 +140,9 @@ public class PlayerMovement : MonoBehaviour
 
         // 3. 벽 잡기 체크 (공중에 있고, 위로 올라가는 중일 때만)
         CheckLedge();
+
+        // 4. [새로운 기능] 추락 및 착지 감지
+        HandleFallDetection();
     }
 
      private void CheckGrounded()
@@ -172,7 +200,7 @@ public class PlayerMovement : MonoBehaviour
  
              // [새로운 기능] 너무 먼 거리는 순간이동 후보에서 제외합니다.
              float distanceToTarget = Vector3.Distance(transform.position, hit.point);
-             if (distanceToTarget > 100f)
+             if (distanceToTarget > maxTeleportDistance)
              {
                  continue; // 거리가 50 이상이면 이 발판은 무시하고 다음 발판을 확인합니다.
              }
@@ -342,7 +370,7 @@ public class PlayerMovement : MonoBehaviour
 
                     // [새로운 기능] 너무 먼 거리는 순간이동 후보에서 제외합니다.
                     float distanceToTarget = Vector3.Distance(transform.position, hit.point);
-                    if (distanceToTarget > 50f)
+                    if (distanceToTarget > maxTeleportDistance)
                     {
                         continue; // 거리가 50 이상이면 이 발판은 무시하고 다음 발판을 확인합니다.
                     }
@@ -610,6 +638,90 @@ public class PlayerMovement : MonoBehaviour
 
         // 카메라와 플레이어 사이에 Wall이 있는지 단순하게 확인합니다.
         return Physics.Raycast(camRotation.transform.position, direction, playerDistance, wallLayer);
+    }
+
+    private void HandleFallDetection()
+    {
+        if (transform.position.y < deathYLevel)
+        {
+            HandleDeath("추락");
+        }
+    }
+
+
+    /// <summary>
+    /// [새로운 기능] 사망 처리를 담당하는 함수입니다.
+    /// </summary>
+    private void HandleDeath(string cause)
+    {
+        Debug.LogWarning($"사망! 원인: {cause}");
+
+
+        // [수정] 초기 위치로 플레이어를 리스폰시킵니다.
+        transform.position = initialPosition;
+        // 추락하던 속도를 0으로 초기화하여 리스폰 후 바로 다시 떨어지는 것을 방지합니다.
+        rb.linearVelocity = Vector3.zero;
+    }
+
+    /// <summary>
+    /// [새로운 기능] 상호작용 입력을 처리합니다.
+    /// </summary>
+    private void HandleInteraction()
+    {
+        // 나레이션을 읽고 있는 상태일 때
+        if (isReading)
+        {
+            // Z키를 다시 누르면 나레이션을 닫습니다.
+            if (Keyboard.current.zKey.wasPressedThisFrame)
+            {
+                isReading = false;
+                narrationPanelUI.SetActive(false); // 나레이션 패널 숨기기
+                // 플레이어가 여전히 상호작용 범위 안에 있다면, 다시 프롬프트를 띄웁니다.
+                if (currentInteractable != null)
+                {
+                    interactionPromptUI.SetActive(true);
+                }
+            }
+            return;
+        }
+
+        // 상호작용 가능한 오브젝트가 있고, Z키를 눌렀을 때
+        if (currentInteractable != null && Keyboard.current.zKey.wasPressedThisFrame)
+        {
+            isReading = true;
+            narrationTextUI.text = currentInteractable.narrationText; // UI 텍스트 설정
+            narrationPanelUI.SetActive(true); // 나레이션 패널 보이기
+            interactionPromptUI.SetActive(false); // 상호작용 프롬프트 숨기기
+        }
+    }
+
+    // 다른 오브젝트의 트리거 콜라이더에 들어갔을 때 호출됩니다.
+    private void OnTriggerEnter(Collider other)
+    {
+        // 트리거에 들어온 오브젝트에서 InteractableSign 스크립트를 찾아봅니다.
+        InteractableSign sign = other.GetComponent<InteractableSign>();
+        if (sign != null)
+        {
+            currentInteractable = sign; // 상호작용 대상으로 설정
+            interactionPromptUI.SetActive(true); // "Z키" 프롬프트 UI 보이기
+        }
+    }
+
+    // 다른 오브젝트의 트리거 콜라이더에서 나왔을 때 호출됩니다.
+    private void OnTriggerExit(Collider other)
+    {
+        // 트리거에서 나간 오브젝트가 현재 상호작용 대상과 같다면
+        if (other.GetComponent<InteractableSign>() == currentInteractable)
+        {
+            // 나레이션을 읽고 있는 중이었다면 강제로 닫습니다.
+            if (isReading)
+            {
+                isReading = false;
+                narrationPanelUI.SetActive(false);
+            }
+            currentInteractable = null; // 상호작용 대상 초기화
+            interactionPromptUI.SetActive(false); // "Z키" 프롬프트 UI 숨기기
+        }
     }
 }
 
