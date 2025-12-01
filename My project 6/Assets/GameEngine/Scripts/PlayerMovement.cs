@@ -32,7 +32,7 @@ public class PlayerMovement : MonoBehaviour
     private Renderer playerRenderer; // 플레이어 모델의 Renderer 컴포넌트
 
     [Header("Fall Damage")]
-    public float deathYLevel = 30f; // 이 Y축 높이 이하로 떨어지면 사망 처리
+    public float deathYLevel = 0f; // 이 Y축 높이 이하로 떨어지면 사망 처리
     public float maxTeleportDistance = 50f; // 자동 붙이기 기능의 최대 순간이동 거리
 
     [Header("Interaction")]
