@@ -309,6 +309,15 @@ public class PlayerMovement : MonoBehaviour
             moveInput = 1f;
         }
 
+        // [수정] 플레이어가 처음으로 움직였을 때 GameManager에 게임 시작을 알립니다.
+        if (moveInput != 0f && GameManager.Instance != null && !GameManager.Instance.IsGameplayActive)
+        {
+            GameManager.Instance.StartGameplay();
+        }
+
+        // 게임이 아직 시작되지 않았다면 움직이지 않습니다.
+        if (GameManager.Instance != null && !GameManager.Instance.IsGameplayActive) moveInput = 0f;
+
         // 2. 현재 Rigidbody의 속도를 가져와 Y축 속도(중력, 점프)는 그대로 유지
         // Y축 속도는 그대로 두고, X와 Z축 속도만 새로 계산합니다.
         float yVelocity = rb.linearVelocity.y;
@@ -650,17 +659,28 @@ public class PlayerMovement : MonoBehaviour
 
 
     /// <summary>
-    /// [새로운 기능] 사망 처리를 담당하는 함수입니다.
+    /// 사망 처리를 담당하는 함수입니다. (public으로 변경)
     /// </summary>
-    private void HandleDeath(string cause)
+    public void HandleDeath(string cause)
     {
         Debug.LogWarning($"사망! 원인: {cause}");
 
-
-        // [수정] 초기 위치로 플레이어를 리스폰시킵니다.
+        // 초기 위치로 플레이어를 리스폰시킵니다.
         transform.position = initialPosition;
         // 추락하던 속도를 0으로 초기화하여 리스폰 후 바로 다시 떨어지는 것을 방지합니다.
         rb.linearVelocity = Vector3.zero;
+
+        // GameManager를 찾아 게임 오버 UI를 띄웁니다.
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.GameOver();
+        }
+
+        // [수정] 카메라의 위치와 회전도 함께 초기화합니다.
+        if (camRotation != null)
+        {
+            camRotation.ResetCamera();
+        }
     }
 
     /// <summary>

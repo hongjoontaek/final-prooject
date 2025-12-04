@@ -6,7 +6,7 @@ public class CameraRotation : MonoBehaviour
 {
     [Header("회전 설정")]
     public Transform target; // 카메라가 바라볼 대상 (플레이어) - 사용하지 않지만 추후 활용 가능
-    public float rotationSpeed = 7.5f; // 회전 속도 (값을 높여서 더 빠르게 수정)
+    public float rotationSpeed = 100f; // 회전 속도 (값을 높여서 더 빠르게 수정)
     public float rotationEndThreshold = 0.1f; // 회전이 끝났다고 판단할 각도 임계값
 
     // 카메라의 현재 시점을 나타내는 열거형
@@ -20,6 +20,10 @@ public class CameraRotation : MonoBehaviour
     private int viewIndex = 0; // 현재 뷰 인덱스 (0:Front, 1:Right, 2:Back, 3:Left)
     private readonly CameraView[] views = { CameraView.Front, CameraView.Right, CameraView.Back, CameraView.Left };
     
+    private Quaternion initialCameraRotation; // 카메라의 초기 회전값
+    private Quaternion initialPlayerRotation; // 플레이어의 초기 회전값
+    private int initialViewIndex; // 초기 뷰 인덱스
+
     private Vector3 offset; // 플레이어와 카메라 사이의 거리
     private PlayerMovement playerMovement; // 플레이어 이동 스크립트 참조
 
@@ -41,10 +45,13 @@ public class CameraRotation : MonoBehaviour
             return;
         }
 
-        // 시작할 때 현재 회전값을 목표 회전값으로 초기화
-        targetRotation = transform.rotation;
-        playerTargetRotation = target.rotation; // 플레이어의 목표 회전값도 초기화
+        // 시작할 때의 상태를 저장합니다.
+        initialCameraRotation = transform.rotation;
+        initialPlayerRotation = target.rotation;
+        initialViewIndex = viewIndex;
         // 플레이어로부터의 초기 거리와 방향을 저장
+        targetRotation = initialCameraRotation;
+        playerTargetRotation = initialPlayerRotation;
         offset = transform.position - target.position;
         UpdateCurrentView();
     }
@@ -110,5 +117,24 @@ public class CameraRotation : MonoBehaviour
     {
         currentView = views[viewIndex];
         Debug.Log("Current Camera View: " + currentView);
+    }
+
+    /// <summary>
+    /// 카메라와 플레이어의 회전을 초기 상태로 리셋합니다.
+    /// </summary>
+    public void ResetCamera()
+    {
+        Debug.Log("카메라 위치와 회전을 초기화합니다.");
+
+        // 내부 상태 변수들을 초기값으로 되돌립니다.
+        viewIndex = initialViewIndex;
+        targetRotation = initialCameraRotation;
+        playerTargetRotation = initialPlayerRotation;
+
+        // 카메라와 플레이어의 위치/회전을 즉시 초기 상태로 설정합니다.
+        transform.position = target.position + (initialCameraRotation * offset);
+        transform.rotation = initialCameraRotation;
+        target.rotation = initialPlayerRotation;
+        UpdateCurrentView();
     }
 }

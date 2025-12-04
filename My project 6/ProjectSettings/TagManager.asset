@@ -6,6 +6,7 @@ TagManager:
   tags:
   - New tag
   - Ground
+  - GameOverUI
   layers:
   - Default
   - TransparentFX
