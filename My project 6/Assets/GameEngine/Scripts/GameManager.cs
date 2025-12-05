@@ -12,6 +12,7 @@ public class GameManager : MonoBehaviour
     private CanvasGroup gameOverCanvasGroup;
 
     private bool isGamePaused = false; // 게임 일시 정지 상태
+    public bool IsGamePaused => isGamePaused; // [새로운 기능] 외부에서 isGamePaused 상태를 읽을 수 있도록 프로퍼티 추가
     public bool IsGameplayActive { get; private set; } = false; // 플레이어가 움직이기 시작했는지 여부
 
     void Awake()

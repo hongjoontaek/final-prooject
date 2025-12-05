@@ -58,6 +58,12 @@ public class CameraRotation : MonoBehaviour
 
     void Update()
     {
+        // [수정] 게임 오버 UI가 활성화되어 있으면 카메라 회전 입력을 무시합니다.
+        if (GameManager.Instance != null && GameManager.Instance.IsGamePaused)
+        {
+            return;
+        }
+
         // Q 키를 누르면 왼쪽으로 90도 회전
         if (Keyboard.current.qKey.wasPressedThisFrame)
         {
@@ -102,14 +108,10 @@ public class CameraRotation : MonoBehaviour
         else
         {
             // 회전이 거의 끝났다면, 목표 각도로 즉시 이동하여 깔끔하게 마무리합니다.
-            if (IsRotating) // 회전이 막 끝난 첫 프레임에만 실행
-            {
-                transform.rotation = targetRotation;
-                target.rotation = playerTargetRotation;
-            }
+            transform.rotation = targetRotation;
+            target.rotation = playerTargetRotation;
             IsRotating = false;
         }
-
     }
 
     // 현재 뷰 상태를 업데이트하고 로그를 출력하는 함수

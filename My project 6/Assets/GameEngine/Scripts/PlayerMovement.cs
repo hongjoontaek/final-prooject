@@ -93,6 +93,12 @@ public class PlayerMovement : MonoBehaviour
     // 매 프레임마다 호출 (주로 입력 감지 및 논리 처리)
     void Update()
     {
+        // [수정] 게임 오버 UI가 활성화되어 있으면 모든 입력을 무시합니다.
+        if (GameManager.Instance != null && GameManager.Instance.IsGamePaused)
+        {
+            return;
+        }
+
         // [새로운 기능] 상호작용 처리
         HandleInteraction();
 
@@ -260,6 +266,12 @@ public class PlayerMovement : MonoBehaviour
     // 고정된 물리 프레임마다 호출 (물리 계산에 적합)
     void FixedUpdate()
     {
+        // [수정] 게임 오버 UI가 활성화되어 있으면 모든 물리 처리를 무시합니다.
+        if (GameManager.Instance != null && GameManager.Instance.IsGamePaused)
+        {
+            return;
+        }
+
         // 벽 오르기 중에는 물리 계산을 무시합니다.
         if (isClimbing)
         {
