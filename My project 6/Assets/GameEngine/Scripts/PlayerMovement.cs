@@ -119,8 +119,29 @@ public class PlayerMovement : MonoBehaviour
         
         // [추가] 모델 트랜스폼이 할당되지 않았다면, 애니메이터의 트랜스폼을 기본값으로 사용합니다.
         if (modelTransform == null && animator != null)
+        // [수정] 모델 트랜스폼이 할당되지 않았거나 루트와 같다면, 자식 오브젝트 중에서 적절한 모델을 찾습니다.
+        if (modelTransform == null || modelTransform == transform)
         {
             modelTransform = animator.transform;
+            // 1. Animator가 있는 자식 오브젝트 찾기 (루트 제외)
+            if (animator != null && animator.transform != transform)
+            {
+                modelTransform = animator.transform;
+            }
+            // 2. Animator가 없다면 Renderer가 있는 자식 오브젝트 찾기
+            else
+            {
+                Renderer childRenderer = GetComponentInChildren<Renderer>();
+                if (childRenderer != null && childRenderer.transform != transform)
+                {
+                    modelTransform = childRenderer.transform;
+                }
+                // 3. 그래도 없으면 첫 번째 자식이라도 사용
+                else if (transform.childCount > 0)
+                {
+                    modelTransform = transform.GetChild(0);
+                }
+            }
         }
 
         // [추가] 코드에서 물리 이동(Rigidbody)을 직접 제어하므로, 애니메이션에 의한 이동(Root Motion)은 비활성화합니다.
@@ -133,12 +154,18 @@ public class PlayerMovement : MonoBehaviour
         if (modelTransform == transform)
         {
             Debug.LogWarning("주의: 'Model Transform'이 플레이어 최상위 오브젝트와 같습니다. 3D 모델을 자식 오브젝트로 분리해야 회전이 정상 작동합니다.");
+            Debug.LogError("치명적 오류: 'Model Transform'이 Player(루트)와 같습니다! 회전이 작동하지 않습니다. 3D 모델을 자식 오브젝트로 분리하고 Model Transform에 할당해주세요.");
         }
 
         // [추가] 머리 트랜스폼이 할당되지 않았고, 캐릭터가 Humanoid라면 자동으로 머리를 찾습니다.
         if (headTransform == null && animator != null && animator.isHuman)
         {
             headTransform = animator.GetBoneTransform(HumanBodyBones.Head);
+        }
+        
+        if (lockHeadRotation && headTransform == null)
+        {
+            Debug.LogWarning("Head Rotation Lock이 켜져 있지만, Head Transform을 찾을 수 없습니다. 인스펙터에서 할당해주세요.");
         }
 
         // [추가] 점프 애니메이션 속도를 물리 점프 시간에 맞춰 동기화합니다.
@@ -251,6 +278,8 @@ public class PlayerMovement : MonoBehaviour
         // 3. 캐릭터 모델 회전 (이동 방향 바라보기)
         // [수정] 입력에 따라 즉시 회전하도록 단순화했습니다.
         if (modelTransform != null)
+        // [수정] 모델이 루트 오브젝트(Player)와 같으면 회전시키지 않습니다. (CameraRotation과 충돌 방지)
+        if (modelTransform != null && modelTransform != transform)
         {
             Quaternion targetRotation = Quaternion.Euler(0, 180, 0); // 기본값: 정면(180도)
 
