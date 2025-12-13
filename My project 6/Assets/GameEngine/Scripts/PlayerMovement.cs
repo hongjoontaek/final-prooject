@@ -8,6 +8,12 @@ public class PlayerMovement : MonoBehaviour
     [Header("Movement")]
     public float speed = 5f; // 플레이어 이동 속도
     public float jumpForce = 7f; // 플레이어 점프 힘
+    public Transform modelTransform; // [추가] 회전시킬 캐릭터 모델 (설정하지 않으면 Animator가 있는 오브젝트 사용)
+    public float modelRotationSpeed = 15f; // [추가] 모델 회전 속도 (부드러운 회전을 위해 사용)
+    public float runRotationAngle = 135f; // [추가] 달릴 때 바라볼 각도 (90: 완전 측면, 135: 대각선/얼굴 보임)
+    public Transform headTransform; // [추가] 회전을 고정할 머리 트랜스폼 (Humanoid라면 자동 할당 시도)
+    public bool lockHeadRotation = true; // [추가] 머리가 항상 카메라를 바라보게 할지 여부
+    public Vector3 headRotationOffset; // [추가] 머리 회전 보정값 (머리가 삐뚤어지면 이 값을 조절하세요)
     [Header("Jump Physics")]
     public float fallMultiplier = 2f; // 떨어질 때 적용할 중력 배수 (더 빨리 떨어지게 함)
     public float lowJumpMultiplier = 2f; // 짧게 점프할 때 적용할 중력 배수
@@ -26,10 +32,22 @@ public class PlayerMovement : MonoBehaviour
     private bool isClimbing = false; // 현재 벽을 오르는 중인지 상태를 저장할 변수
 
     [Header("Visibility")]
+    public bool testSilhouetteMode = false; // [Debug] 체크하면 항상 실루엣 머티리얼이 보입니다.
+    public bool testOverlayMode = false; // [Debug] 체크하면 항상 오버레이 머티리얼이 보입니다.
     public Material silhouetteMaterial; // 벽 뒤에 있을 때 사용할 실루엣 머티리얼
+    public Material overlayMaterial; // [추가] 점프 등으로 살짝 겹쳤을 때 사용할 머티리얼 (캐릭터 모습 유지 + 벽 뚫기)
     public Transform visibilityCheckTarget; // 가려졌는지 확인할 플레이어의 부위 (보통 머리나 몸통 중앙)
-    private Material normalMaterial; // 플레이어의 원래 머티리얼
-    private Renderer playerRenderer; // 플레이어 모델의 Renderer 컴포넌트
+    
+    // [수정] 다중 렌더러 지원을 위한 구조체 및 리스트
+    private class RendererData
+    {
+        public Renderer renderer;
+        public Material[] originalMaterials;
+    }
+    private System.Collections.Generic.List<RendererData> allRenderers = new System.Collections.Generic.List<RendererData>();
+    
+    private enum OcclusionState { None, Partial, Full } // 가려짐 상태 정의
+    private OcclusionState currentOcclusionState = (OcclusionState)(-1); // [수정] 초기 상태를 유효하지 않은 값으로 설정하여 시작 시 강제 업데이트
 
     [Header("Fall Damage")]
     public float deathYLevel = 0f; // 이 Y축 높이 이하로 떨어지면 사망 처리
@@ -48,9 +66,9 @@ public class PlayerMovement : MonoBehaviour
     private bool jumpRequested = false; // 점프 요청을 저장할 변수
     private bool dropRequested = false; // 아래로 내려가기 요청을 저장할 변수
     private bool isDropping = false; // 현재 아래로 내려가는 중인지 상태를 저장할 변수
-    private bool isSilhouetteMode = false; // 현재 실루엣 모드인지 상태를 저장
     private Vector3 initialPosition; // 초기 스폰 위치를 저장할 변수
     private bool wasCameraRotating = false; // 이전 프레임에서 카메라가 회전 중이었는지 확인
+    private Animator animator; // [추가] 애니메이터 컴포넌트 참조
 
     // 게임 시작 시 1번 호출
     void Start()
@@ -68,15 +86,22 @@ public class PlayerMovement : MonoBehaviour
         //    이 스크립트의 currentView 값을 사용하여 플레이어 이동 방향을 결정합니다.
         camRotation = Camera.main.GetComponent<CameraRotation>();
 
-        // 3. [새로운 기능] 플레이어의 렌더러와 원래 머티리얼을 가져옵니다.
-        playerRenderer = GetComponentInChildren<Renderer>();
-        if (playerRenderer != null)
+        // 3. [수정] 플레이어의 모든 렌더러(몸통, 팔, 머리 등)를 찾아서 저장합니다.
+        Renderer[] foundRenderers = GetComponentsInChildren<Renderer>();
+        foreach (Renderer r in foundRenderers)
         {
-            normalMaterial = playerRenderer.material;
+            // 파티클이나 트레일은 제외하고 모델만 포함시킵니다.
+            if (r is ParticleSystemRenderer || r is TrailRenderer) continue;
+
+            RendererData data = new RendererData();
+            data.renderer = r;
+            data.originalMaterials = r.sharedMaterials; // 원래 머티리얼 배열 저장
+            allRenderers.Add(data);
         }
-        else
+
+        if (allRenderers.Count == 0)
         {
-            Debug.LogError("플레이어 모델의 Renderer를 찾을 수 없습니다! 자식 오브젝트에 모델이 있는지 확인해주세요.");
+            Debug.LogError("플레이어 모델에서 Renderer를 하나도 찾을 수 없습니다!");
         }
         // visibilityCheckTarget이 설정되지 않았다면, 플레이어 자기 자신을 타겟으로 설정합니다.
         if (visibilityCheckTarget == null)
@@ -88,6 +113,36 @@ public class PlayerMovement : MonoBehaviour
 
         // 4. [새로운 기능] 초기 위치 저장
         initialPosition = transform.position;
+        
+        // [추가] 자식 오브젝트(3D 모델)에 있는 Animator 컴포넌트를 가져옵니다.
+        animator = GetComponentInChildren<Animator>();
+        
+        // [추가] 모델 트랜스폼이 할당되지 않았다면, 애니메이터의 트랜스폼을 기본값으로 사용합니다.
+        if (modelTransform == null && animator != null)
+        {
+            modelTransform = animator.transform;
+        }
+
+        // [추가] 코드에서 물리 이동(Rigidbody)을 직접 제어하므로, 애니메이션에 의한 이동(Root Motion)은 비활성화합니다.
+        if (animator != null)
+        {
+            animator.applyRootMotion = false;
+        }
+
+        // [안전장치] 모델이 루트 오브젝트(Player)와 같다면 회전이 제대로 안 될 수 있음을 경고
+        if (modelTransform == transform)
+        {
+            Debug.LogWarning("주의: 'Model Transform'이 플레이어 최상위 오브젝트와 같습니다. 3D 모델을 자식 오브젝트로 분리해야 회전이 정상 작동합니다.");
+        }
+
+        // [추가] 머리 트랜스폼이 할당되지 않았고, 캐릭터가 Humanoid라면 자동으로 머리를 찾습니다.
+        if (headTransform == null && animator != null && animator.isHuman)
+        {
+            headTransform = animator.GetBoneTransform(HumanBodyBones.Head);
+        }
+
+        // [추가] 점프 애니메이션 속도를 물리 점프 시간에 맞춰 동기화합니다.
+        SyncJumpAnimationSpeed();
     }
 
     // 매 프레임마다 호출 (주로 입력 감지 및 논리 처리)
@@ -121,6 +176,9 @@ public class PlayerMovement : MonoBehaviour
         CheckGrounded(); // 새로운 바닥 체크 함수 호출
         // (확인용) Scene 뷰에 빨간색 레이저를 그려 바닥 체크가 어디서 이루어지는지 시각적으로 보여줍니다.
         Debug.DrawRay(transform.position, Vector3.down * groundCheckDistance, Color.red); 
+        
+        // [추가] 애니메이션 상태 업데이트 (달리기, 점프 상태 등)
+        UpdateAnimations();
 
         // 2. 점프 (바닥에 있을 때만 점프 가능)
         bool isDownPressed = Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed;
@@ -141,6 +199,8 @@ public class PlayerMovement : MonoBehaviour
             {
                 Debug.Log("점프 입력 감지! (isGrounded: " + isGrounded + ")");
                 jumpRequested = true; // 점프 요청을 기록
+                // [추가] 점프 애니메이션 트리거 실행
+                if (animator != null) animator.SetTrigger("Jump");
             }
         }
 
@@ -149,6 +209,66 @@ public class PlayerMovement : MonoBehaviour
 
         // 4. [새로운 기능] 추락 및 착지 감지
         HandleFallDetection();
+    }
+
+    // [추가] 애니메이션 처리가 끝난 후 머리 회전을 덮어쓰기 위해 LateUpdate를 사용합니다.
+    void LateUpdate()
+    {
+        // 머리 고정 기능이 켜져 있고, 머리와 카메라가 모두 존재할 때
+        if (lockHeadRotation && headTransform != null && camRotation != null)
+        {
+            // 머리에서 카메라를 바라보는 방향 벡터 계산
+            Vector3 directionToCamera = camRotation.transform.position - headTransform.position;
+
+            // [수정] 카메라를 바라보는 회전값 생성 (Vector3.up을 사용하여 머리가 기울어지는 것 방지)
+            Quaternion lookRotation = Quaternion.LookRotation(directionToCamera, Vector3.up);
+
+            // [수정] 보정값(Offset)을 적용하여 최종 회전 적용
+            // 3D 모델마다 뼈의 축이 다르므로, 인스펙터에서 headRotationOffset을 조절하여 정면을 맞추세요.
+            headTransform.rotation = lookRotation * Quaternion.Euler(headRotationOffset);
+        }
+    }
+
+    // [추가] 애니메이션 파라미터 업데이트 및 캐릭터 모델 회전 처리
+    private void UpdateAnimations()
+    {
+        // 1. 이동 입력 확인
+        float moveInput = 0f;
+        if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) moveInput -= 1f;
+        if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) moveInput += 1f;
+
+        // 2. 애니메이터 파라미터 업데이트
+        // [수정] Animator가 있을 때만 파라미터를 업데이트합니다.
+        if (animator != null)
+        {
+            // 이동 입력이 있으면 IsRunning을 true로 설정
+            // [수정] 점프 중(공중)에는 달리기 애니메이션이 재생되지 않도록 isGrounded 조건을 추가합니다.
+            animator.SetBool("IsRunning", isGrounded && moveInput != 0);
+            // 바닥에 닿아있는지 여부를 IsGrounded로 설정 (점프/착지 전환용)
+            animator.SetBool("IsGrounded", isGrounded);
+        }
+
+        // 3. 캐릭터 모델 회전 (이동 방향 바라보기)
+        // [수정] 입력에 따라 즉시 회전하도록 단순화했습니다.
+        if (modelTransform != null)
+        {
+            Quaternion targetRotation = Quaternion.Euler(0, 180, 0); // 기본값: 정면(180도)
+
+            if (moveInput > 0) // 오른쪽 입력 (D키)
+            {
+                // [수정] 완전 측면(90도) 대신 설정된 각도(예: 135도)를 사용하여 얼굴이 보이게 합니다.
+                targetRotation = Quaternion.Euler(0, runRotationAngle, 0);
+            }
+            else if (moveInput < 0) // 왼쪽 입력 (A키)
+            {
+                targetRotation = Quaternion.Euler(0, -runRotationAngle, 0);
+            }
+            // else의 경우 targetRotation이 이미 180(정면)으로 초기화되어 있으므로 생략 가능
+            // 또한, 이전에 있던 modelTransform.localRotation 직접 할당 코드를 제거하여 Slerp가 정상 작동하게 합니다.
+
+            // [수정] Slerp를 사용하여 부드럽게 회전시킵니다.
+            modelTransform.localRotation = Quaternion.Slerp(modelTransform.localRotation, targetRotation, modelRotationSpeed * Time.deltaTime);
+        }
     }
 
      private void CheckGrounded()
@@ -160,16 +280,21 @@ public class PlayerMovement : MonoBehaviour
              isGrounded = false;
              return;
          }
-         // 1. 기본 바닥 체크 (플레이어 바로 아래)
-         bool basicHit = Physics.Raycast(transform.position, Vector3.down, groundCheckDistance, groundLayer);
+         
+         // 1. [수정] 기본 바닥 체크 (Raycast -> SphereCast로 변경)
+         // 발바닥(Pivot)보다 약간 위(0.5f)에서 시작하여 아래로 두꺼운(반지름 0.3f) 빔을 쏩니다.
+         // 이렇게 하면 다리 사이나 발 끝부분도 바닥으로 잘 인식합니다.
+         Vector3 castOrigin = transform.position + Vector3.up * 0.5f;
+         bool basicHit = Physics.SphereCast(castOrigin, 0.3f, Vector3.down, out RaycastHit hitInfo, groundCheckDistance, groundLayer);
+         
          if (basicHit)
          {
              isGrounded = true;
              return;
          }
  
-         // 2. "차원 접힘" 바닥 체크 (공중에 있을 때만 작동)
-         Vector3 boxCenter = transform.position + Vector3.down * 0.1f; // 플레이어 발밑에서 시작
+         // 2. "차원 접힘" 바닥 체크 (공중에 있을 때만 작동) - 시작 위치를 약간 위로 조정
+         Vector3 boxCenter = transform.position + Vector3.up * 0.5f; 
          Vector3 halfExtents; // 판의 크기 (X, Y, Z)
          float maxDistance = groundCheckDistance; // 얼마나 아래까지 체크할지
  
@@ -211,6 +336,13 @@ public class PlayerMovement : MonoBehaviour
                  continue; // 거리가 50 이상이면 이 발판은 무시하고 다음 발판을 확인합니다.
              }
  
+             // [추가] 플레이어와 목표 발판 사이에 벽이 있는지 확인합니다.
+             // 플레이어 위치에서 목표 위치로 레이를 쏴서 벽(Wall Layer)에 닿으면 이동하지 않습니다.
+             if (Physics.Raycast(transform.position, (targetPos - transform.position).normalized, distanceToTarget, wallLayer))
+             {
+                 continue;
+             }
+
              Vector3 rayStart = transform.position - (targetPos - transform.position).normalized * 0.5f;
              float distance = Vector3.Distance(rayStart, targetPos);
              Vector3 direction = (targetPos - rayStart).normalized;
@@ -314,11 +446,11 @@ public class PlayerMovement : MonoBehaviour
         float moveInput = 0f;
         if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed)
         {
-            moveInput = -1f;
+            moveInput -= 1f;
         }
         if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed)
         {
-            moveInput = 1f;
+            moveInput += 1f;
         }
 
         // [수정] 플레이어가 처음으로 움직였을 때 GameManager에 게임 시작을 알립니다.
@@ -458,8 +590,9 @@ public class PlayerMovement : MonoBehaviour
         {
             rb.linearVelocity += Vector3.up * Physics.gravity.y * (fallMultiplier - 1) * Time.deltaTime;
         }
-        // 2. 점프 키를 짧게 누르면 점프 높이가 낮아지도록 합니다.
-        else if (rb.linearVelocity.y > 0 && !Keyboard.current.spaceKey.isPressed)
+        // 2. [수정] 점프 높이를 '짧게 누를 때'의 값으로 통일합니다.
+        // 버튼을 길게 누르든 짧게 누르든 상관없이 항상 lowJumpMultiplier(높은 중력)를 적용하여 점프 높이를 낮게 고정합니다.
+        else if (rb.linearVelocity.y > 0)
         {
             rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.deltaTime;
         }
@@ -613,52 +746,158 @@ public class PlayerMovement : MonoBehaviour
     /// </summary>
     private void HandleVisibility()
     {
-        if (playerRenderer == null || silhouetteMaterial == null || normalMaterial == null)
+        if (allRenderers.Count == 0 || silhouetteMaterial == null)
             return;
 
-        bool isCameraRotatingNow = camRotation.IsRotating;
-
-        // 1. 카메라 회전이 '끝나는' 시점을 감지합니다.
-        if (wasCameraRotating && !isCameraRotatingNow)
+        // [Debug] 테스트 모드가 켜져 있으면 무조건 실루엣 머티리얼을 적용합니다.
+        if (testSilhouetteMode)
         {
-            isSilhouetteMode = IsPlayerObscured();
+            if (currentOcclusionState != OcclusionState.Full)
+            {
+                SetMaterialState(silhouetteMaterial);
+                currentOcclusionState = OcclusionState.Full;
+            }
+            return;
         }
 
-        // 2. 실루엣 모드일 때, 플레이어가 벽 뒤에서 '나왔는지' 확인합니다.
-        if (isSilhouetteMode)
+        // [Debug] 오버레이 테스트 모드가 켜져 있으면 무조건 오버레이 머티리얼을 적용합니다.
+        if (testOverlayMode)
         {
-            if (!IsPlayerObscured())
+            if (currentOcclusionState != OcclusionState.Partial)
             {
-                isSilhouetteMode = false; // 벽 뒤에서 나왔으므로 실루엣 모드를 끕니다.
+                SetMaterialState(overlayMaterial);
+                currentOcclusionState = OcclusionState.Partial;
+            }
+            return;
+        }
+
+        // [수정] 카메라 회전 중에는 깜빡임을 방지하기 위해 체크를 건너뜁니다.
+        if (camRotation.IsRotating)
+        {
+            wasCameraRotating = true;
+            return;
+        }
+
+        // [수정] 회전 중이 아닐 때는 항상 가려짐 여부를 체크합니다.
+        // 이렇게 해야 플레이어가 걸어서 벽 뒤로 들어갈 때도 즉시 실루엣(또는 캐릭터)이 보입니다.
+        OcclusionState newState = CheckOcclusionState();
+
+        // [수정] 그림자 모드(Full)로의 진입은 오직 '카메라 회전 직후'에만 허용합니다.
+        // 즉, 이동(좌우, 점프 등)을 통해 벽 뒤로 들어간 경우에는 그림자가 아닌 오버레이(Partial) 상태를 유지합니다.
+        // 단, 이미 그림자 모드인 경우에는 그대로 유지합니다.
+        if (newState == OcclusionState.Full && currentOcclusionState != OcclusionState.Full)
+        {
+            // 카메라 회전에 의해 가려진 것이 아니라면(즉, 이동해서 가려졌다면) 오버레이로 강제 변경
+            if (!wasCameraRotating)
+            {
+                newState = OcclusionState.Partial;
             }
         }
 
-        // 3. 최종 'isSilhouetteMode' 상태에 따라 머티리얼을 적용합니다.
-        if (isSilhouetteMode)
+        // 상태가 바뀌었을 때만 머티리얼을 교체합니다.
+        if (newState != currentOcclusionState)
         {
-            playerRenderer.material = silhouetteMaterial;
+            currentOcclusionState = newState;
+            Debug.Log($"[Visibility] 가려짐 상태 변경: {currentOcclusionState}"); // 상태 변경 로그 출력
+            
+            switch (currentOcclusionState)
+            {
+                case OcclusionState.Full:
+                    SetMaterialState(silhouetteMaterial); // 완전 가려짐 -> 그림자
+                    break;
+                case OcclusionState.Partial:
+                case OcclusionState.None:
+                    // [수정] 평상시(None)나 부분 가려짐(Partial)일 때도 오버레이 머티리얼을 적용하여
+                    // 항상 벽보다 앞에 보이도록(ZTest Always) 합니다.
+                    SetMaterialState(overlayMaterial != null ? overlayMaterial : null); 
+                    break;
+            }
         }
-        else
-        {
-            playerRenderer.material = normalMaterial;
-        }
+        
+        wasCameraRotating = false;
+    }
 
-        // 다음 프레임을 위해 현재 카메라 회전 상태를 저장합니다.
-        wasCameraRotating = isCameraRotatingNow;
+    // [추가] 모든 렌더러의 머티리얼을 일괄 변경하는 함수
+    private void SetMaterialState(Material matToApply)
+    {
+        foreach (var data in allRenderers)
+        {
+            if (data.renderer == null) continue;
+
+            if (matToApply != null)
+            {
+                // 지정된 머티리얼로 교체 (실루엣 또는 오버레이)
+                Material[] newMats = new Material[data.originalMaterials.Length];
+                for (int i = 0; i < newMats.Length; i++)
+                {
+                    // [수정] 오버레이 머티리얼일 경우, 캐릭터의 원래 텍스처를 입혀서 '그대로' 보이게 합니다.
+                    if (matToApply == overlayMaterial)
+                    {
+                        // 오버레이 머티리얼의 복사본을 만듭니다. (기본 속성 복사)
+                        Material instanceMat = new Material(matToApply);
+                        // 원래 머티리얼에 텍스처가 있다면 복사본에 적용합니다.
+                        if (data.originalMaterials[i].HasProperty("_MainTex"))
+                        {
+                            instanceMat.mainTexture = data.originalMaterials[i].mainTexture;
+                        }
+                        newMats[i] = instanceMat;
+                    }
+                    else
+                    {
+                        // 실루엣(그림자) 등 다른 경우는 지정된 머티리얼 그대로 사용
+                        newMats[i] = matToApply;
+                    }
+                }
+                data.renderer.sharedMaterials = newMats;
+            }
+            else
+            {
+                // 원래 머티리얼로 복구
+                data.renderer.sharedMaterials = data.originalMaterials;
+            }
+        }
     }
 
     // 플레이어가 벽에 가려졌는지 확인하는 헬퍼 함수
     /// <summary>
-    /// 플레이어가 벽에 가려졌는지 확인하는 헬퍼 함수
+    /// 플레이어의 가려짐 상태(없음, 부분, 완전)를 확인하는 함수
     /// </summary>
-    /// <returns>가려졌으면 true, 아니면 false</returns>
-    private bool IsPlayerObscured()
+    /// <returns>OcclusionState</returns>
+    private OcclusionState CheckOcclusionState()
     {
         Vector3 direction = visibilityCheckTarget.position - camRotation.transform.position;
         float playerDistance = direction.magnitude;
+        Vector3 cameraPos = camRotation.transform.position;
+        
+        // [수정] 머리, 가슴, 발 3지점을 모두 체크합니다.
+        // 하나라도 보이면 '안 가려짐(Normal)'으로 판단하여, 점프 시 살짝 겹칠 때 실루엣이 되는 것을 막습니다.
+        Vector3[] checkPoints = new Vector3[] 
+        {
+            visibilityCheckTarget.position,                 // 머리
+            transform.position + Vector3.up * 0.8f,         // 가슴
+            transform.position + Vector3.up * 0.2f          // 발
+        };
 
-        // 카메라와 플레이어 사이에 Wall이 있는지 단순하게 확인합니다.
-        return Physics.Raycast(camRotation.transform.position, direction, playerDistance, wallLayer);
+        int blockedCount = 0;
+        foreach (var point in checkPoints)
+        {
+            Vector3 pointDirection = point - cameraPos;
+            float dist = pointDirection.magnitude;
+            // [수정] 감지 거리를 늘려서 플레이어 바로 앞의 벽도 감지하도록 변경 (0.2f -> 0.01f)
+            if (Physics.Raycast(cameraPos, pointDirection, dist - 0.01f, wallLayer))
+            {
+                blockedCount++;
+            }
+        }
+
+        // (디버그용) 씬 뷰에서 초록색(안 가려짐) 또는 빨간색(가려짐) 선을 그립니다.
+        // Debug.DrawRay(camRotation.transform.position, direction.normalized * (playerDistance - 0.2f), isHit ? Color.red : Color.green);
+
+        if (blockedCount == 0) return OcclusionState.None; // 하나도 안 가려짐
+        
+        if (blockedCount == checkPoints.Length) return OcclusionState.Full; // 모두 가려짐 (그림자)
+
+        return OcclusionState.Partial; // 일부만 가려짐 (캐릭터 오버레이)
     }
 
     private void HandleFallDetection()
@@ -753,6 +992,57 @@ public class PlayerMovement : MonoBehaviour
             }
             currentInteractable = null; // 상호작용 대상 초기화
             interactionPromptUI.SetActive(false); // "Z키" 프롬프트 UI 숨기기
+        }
+    }
+
+    /// <summary>
+    /// [새로운 기능] 물리적인 점프 체공 시간을 계산하여 애니메이션 속도를 맞춥니다.
+    /// </summary>
+    private void SyncJumpAnimationSpeed()
+    {
+        if (animator == null || rb == null) return;
+
+        // 1. 물리적인 점프 체공 시간 계산
+        float gravity = Mathf.Abs(Physics.gravity.y);
+        // F = ma => v = F/m (Impulse 모드이므로 힘이 곧 운동량의 변화량)
+        float jumpVelocity = jumpForce / rb.mass; 
+        
+        // 올라가는 시간 (v = gt => t = v/g)
+        // [수정] 상승 시 항상 lowJumpMultiplier가 적용되므로 이를 반영하여 계산합니다.
+        float timeToPeak = jumpVelocity / (gravity * lowJumpMultiplier);
+        
+        // 내려오는 시간
+        // 낙하 시 중력은 gravity * fallMultiplier가 됨
+        // h = 1/2 * g * t^2 => t_up = sqrt(2h/g)
+        // t_down = sqrt(2h / (g * fallMultiplier)) = t_up / sqrt(fallMultiplier)
+        float timeToLand = timeToPeak / Mathf.Sqrt(fallMultiplier);
+        
+        float totalJumpTime = timeToPeak + timeToLand;
+
+        // 2. 애니메이션 클립 길이 찾기
+        float animationLength = 0f;
+        RuntimeAnimatorController ac = animator.runtimeAnimatorController;
+        if (ac != null)
+        {
+            foreach (AnimationClip clip in ac.animationClips)
+            {
+                // "Jump"라는 이름이 포함된 클립을 찾습니다. (대소문자 무시)
+                if (clip.name.IndexOf("Jump", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    animationLength = clip.length;
+                    break;
+                }
+            }
+        }
+
+        if (animationLength > 0)
+        {
+            // 3. 속도 배수 계산 (애니메이션 길이 / 실제 점프 시간)
+            float jumpSpeedMultiplier = animationLength / totalJumpTime;
+            
+            // Animator에 파라미터 전달 (Animator에 "JumpSpeed" 파라미터가 있어야 함)
+            animator.SetFloat("JumpSpeed", jumpSpeedMultiplier);
+            Debug.Log($"[Jump Sync] 물리 시간: {totalJumpTime:F2}s, 애니메이션: {animationLength:F2}s, 배수: {jumpSpeedMultiplier:F2}");
         }
     }
 }

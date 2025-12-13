@@ -22,6 +22,11 @@ public class GameManager : MonoBehaviour
         {
             // 이미 GameManager 인스턴스가 존재하면, 이 씬에 새로 생긴 GameManager는 스스로를 파괴합니다.
             Debug.Log("중복 GameManager 감지. 새로 생성된 인스턴스를 파괴합니다.");
+            
+            // [추가] 인스펙터 오류(SerializedObjectNotCreatableException) 방지를 위해 Animator가 있다면 비활성화합니다.
+            var anim = GetComponent<Animator>();
+            if (anim != null) anim.enabled = false;
+
             Destroy(gameObject);
             return; // 파괴 후 더 이상 진행하지 않도록 함수를 종료합니다.
         }
@@ -35,7 +40,7 @@ public class GameManager : MonoBehaviour
 
         // [수정] 씬에 있는 모든 EventSystem을 찾아서 중복을 제거합니다.
         // 이 로직은 싱글톤 인스턴스가 결정된 후에 실행되어야 가장 안정적입니다.
-        var eventSystems = FindObjectsOfType<UnityEngine.EventSystems.EventSystem>();
+        var eventSystems = FindObjectsByType<UnityEngine.EventSystems.EventSystem>(FindObjectsSortMode.None);
         if (eventSystems.Length > 1)
         {
             Debug.Log($"중복 EventSystem {eventSystems.Length - 1}개 감지. 정리합니다.");
@@ -154,14 +159,14 @@ public class GameManager : MonoBehaviour
     public void HandleCloudDeath()
     {
         // 플레이어 리스폰 (PlayerMovement의 HandleDeath 함수 호출)
-        PlayerMovement player = FindObjectOfType<PlayerMovement>();
+        PlayerMovement player = FindFirstObjectByType<PlayerMovement>();
         if (player != null)
         {
             player.HandleDeath("구름");
         }
 
         // 구름 리스폰
-        RisingCloud cloud = FindObjectOfType<RisingCloud>();
+        RisingCloud cloud = FindFirstObjectByType<RisingCloud>();
         if (cloud != null)
         {
             cloud.ResetCloud();
