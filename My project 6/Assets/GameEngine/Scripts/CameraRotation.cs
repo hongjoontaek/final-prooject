@@ -24,7 +24,11 @@ public class CameraRotation : MonoBehaviour
     private Quaternion initialPlayerRotation; // 플레이어의 초기 회전값
     private int initialViewIndex; // 초기 뷰 인덱스
 
-    private Vector3 offset; // 플레이어와 카메라 사이의 거리
+    [Header("Camera Distance")]
+    [Tooltip("카메라와 플레이어 사이의 거리를 조절합니다. 1f가 기본 거리입니다.")]
+    public float cameraDistanceMultiplier = 1f; // 카메라 거리 배율
+    private Vector3 initialOffsetDirection; // 플레이어와 카메라 사이의 초기 오프셋 방향
+    private float initialOffsetMagnitude; // 플레이어와 카메라 사이의 초기 오프셋 거리
     private PlayerMovement playerMovement; // 플레이어 이동 스크립트 참조
 
 
@@ -49,10 +53,13 @@ public class CameraRotation : MonoBehaviour
         initialCameraRotation = transform.rotation;
         initialPlayerRotation = target.rotation;
         initialViewIndex = viewIndex;
-        // 플레이어로부터의 초기 거리와 방향을 저장
+        
+        // 플레이어로부터의 초기 오프셋 방향과 거리를 저장
+        Vector3 initialRelativePosition = transform.position - target.position;
+        initialOffsetDirection = initialRelativePosition.normalized;
+        initialOffsetMagnitude = initialRelativePosition.magnitude;
         targetRotation = initialCameraRotation;
         playerTargetRotation = initialPlayerRotation;
-        offset = transform.position - target.position;
         UpdateCurrentView();
     }
 
@@ -92,7 +99,8 @@ public class CameraRotation : MonoBehaviour
         if (target == null) return;
 
         // 1. 목표 회전값을 적용하여 플레이어로부터 얼마나 떨어져야 할지 목표 위치 계산
-        Vector3 desiredPosition = target.position + (targetRotation * offset);
+        Vector3 currentOffset = initialOffsetDirection * (initialOffsetMagnitude * cameraDistanceMultiplier);
+        Vector3 desiredPosition = target.position + (targetRotation * currentOffset);
 
         // 2. 현재 위치에서 목표 위치로 부드럽게 이동 (Lerp)
         transform.position = Vector3.Lerp(transform.position, desiredPosition, rotationSpeed * Time.deltaTime);
@@ -133,8 +141,9 @@ public class CameraRotation : MonoBehaviour
         targetRotation = initialCameraRotation;
         playerTargetRotation = initialPlayerRotation;
 
-        // 카메라와 플레이어의 위치/회전을 즉시 초기 상태로 설정합니다.
-        transform.position = target.position + (initialCameraRotation * offset);
+        // 카메라와 플레이어의 위치/회전을 즉시 초기 상태로 설정합니다. (조절된 거리 적용)
+        Vector3 resetOffset = initialOffsetDirection * (initialOffsetMagnitude * cameraDistanceMultiplier);
+        transform.position = target.position + (initialCameraRotation * resetOffset);
         transform.rotation = initialCameraRotation;
         target.rotation = initialPlayerRotation;
         UpdateCurrentView();
