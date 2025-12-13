@@ -4,17 +4,19 @@ Shader "Unlit/PlayerAlwaysOnTop"
     Properties
     {
         _MainTex ("Texture", 2D) = "white" {}
+        _Color ("Color", Color) = (1,1,1,1)
     }
     SubShader
     {
-        Tags { "RenderType"="Opaque" }
+        Tags { "Queue"="Overlay" "RenderType"="Transparent" }
         LOD 100
+
+        ZTest Always
+        ZWrite Off
+        Blend SrcAlpha OneMinusSrcAlpha
 
         Pass
         {
-            // 이 부분이 핵심입니다!
-            // 겹쳤을 때 렌더링 순서를 앞으로 당겨서 벽보다 앞에 보이게 합니다.
-            Offset -1, -1
 
             CGPROGRAM
             #pragma vertex vert
@@ -35,6 +37,7 @@ Shader "Unlit/PlayerAlwaysOnTop"
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
+            float4 _Color;
 
             v2f vert (appdata v)
             {
@@ -46,7 +49,7 @@ Shader "Unlit/PlayerAlwaysOnTop"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                fixed4 col = tex2D(_MainTex, i.uv);
+                fixed4 col = tex2D(_MainTex, i.uv) * _Color;
                 return col;
             }
             ENDCG
