@@ -9,8 +9,6 @@ public class BreakablePlatform : MonoBehaviour
     [Header("설정")]
     [Tooltip("플레이어가 밟은 후 발판이 부서지기까지의 시간 (초)")]
     public float breakDelay = 1.0f;
-    [Tooltip("발판이 부서진 후 다시 나타나기까지의 시간 (0이면 다시 나타나지 않음)")]
-    public float respawnDelay = 3.0f;
     [Tooltip("플레이어 오브젝트의 태그 (예: 'Player')")]
     public string playerTag = "Player";
 
@@ -27,6 +25,8 @@ public class BreakablePlatform : MonoBehaviour
     private Quaternion initialRotation; // 발판의 초기 회전 (리스폰 시 사용)
     private Vector3 initialLocalPosition; // 흔들림을 위해 초기 로컬 위치 저장
     private bool isBroken = false; // 현재 발판이 부서진 상태인지
+    private Renderer platformRenderer; // 발판의 렌더러 컴포넌트
+    private Collider platformCollider; // 발판의 콜라이더 컴포넌트
     private AudioSource audioSource; // 오디오 재생을 위한 AudioSource
 
     void Start()
@@ -34,6 +34,14 @@ public class BreakablePlatform : MonoBehaviour
         initialPosition = transform.position;
         initialRotation = transform.rotation;
         initialLocalPosition = transform.localPosition; // 로컬 위치 저장
+
+        // 렌더러와 콜라이더 컴포넌트 가져오기 (Inspector에서 할당되지 않았다면)
+        platformRenderer = GetComponentInChildren<Renderer>(); // 하위 객체에서도 렌더러를 찾도록 변경
+        platformCollider = GetComponent<Collider>();
+        if (platformRenderer == null || platformCollider == null)
+        {
+            Debug.LogError("BreakablePlatform 스크립트는 Renderer와 Collider 컴포넌트가 필요합니다! 해당 GameObject에 컴포넌트가 있는지 확인해주세요.", this);
+        }
 
         // AudioSource 컴포넌트 가져오기 (없으면 추가)
         audioSource = GetComponent<AudioSource>();
@@ -80,20 +88,27 @@ public class BreakablePlatform : MonoBehaviour
         transform.localPosition = initialLocalPosition; // 흔들림 후 원래 위치로 복귀
 
         // 발판을 비활성화하여 사라지게 합니다.
-        gameObject.SetActive(false);
+        // [수정] GameObject를 비활성화하는 대신 렌더러와 콜라이더만 비활성화합니다.
+        if (platformRenderer != null) platformRenderer.enabled = false;
+        if (platformCollider != null) platformCollider.enabled = false;
         Debug.Log($"{gameObject.name}: 부서졌습니다.");
 
-        if (respawnDelay > 0)
-        {
-            Debug.Log($"{gameObject.name}: {respawnDelay}초 후 다시 나타납니다.");
-            yield return new WaitForSeconds(respawnDelay);
+        // 발판이 부서진 후에는 외부에서 ResetPlatform()을 호출하여 다시 나타나게 합니다.
+        // 자동 리스폰 로직은 제거되었습니다.
+    }
 
-            // 발판을 초기 위치와 회전으로 되돌리고 활성화합니다.
-            transform.position = initialPosition;
-            transform.rotation = initialRotation;
-            gameObject.SetActive(true);
-            isBroken = false; // 부서진 상태 해제
-            Debug.Log($"{gameObject.name}: 다시 나타났습니다.");
-        }
+    /// <summary>
+    /// 발판을 초기 상태로 되돌리고 다시 활성화합니다.
+    /// 게임 재시작 등 외부 이벤트에 의해 호출됩니다.
+    /// </summary>
+    public void ResetPlatform()
+    {
+        StopAllCoroutines(); // 혹시 진행 중인 코루틴이 있다면 중지
+        transform.position = initialPosition;
+        transform.rotation = initialRotation;
+        if (platformRenderer != null) platformRenderer.enabled = true; // 렌더러 다시 활성화
+        if (platformCollider != null) platformCollider.enabled = true;   // 콜라이더 다시 활성화
+        isBroken = false; // 부서진 상태 해제
+        Debug.Log($"{gameObject.name}: ResetPlatform() 호출로 초기화되었습니다.");
     }
 }

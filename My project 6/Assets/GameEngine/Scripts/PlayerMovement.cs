@@ -5,6 +5,7 @@ using TMPro; // TextMeshPro를 사용하기 위해 이 줄을 추가합니다.
 // MonoBehaviour를 상속받습니다.
 public class PlayerMovement : MonoBehaviour
 {
+
     [Header("Movement")]
     public float speed = 5f; // 플레이어 이동 속도
     public float jumpForce = 7f; // 플레이어 점프 힘
@@ -67,6 +68,8 @@ public class PlayerMovement : MonoBehaviour
     private bool dropRequested = false; // 아래로 내려가기 요청을 저장할 변수
     private bool isDropping = false; // 현재 아래로 내려가는 중인지 상태를 저장할 변수
     private Vector3 initialPosition; // 초기 스폰 위치를 저장할 변수
+    public float externalHorizontalInput { get; set; } = 0f; // [추가] 외부에서 주입되는 수평 이동 입력 (-1: 왼쪽, 0: 없음, 1: 오른쪽)
+    public bool HasHorizontalInput { get; private set; } // [추가] 플레이어가 수평 입력을 하고 있는지 여부
     private bool wasCameraRotating = false; // 이전 프레임에서 카메라가 회전 중이었는지 확인
     private Animator animator; // [추가] 애니메이터 컴포넌트 참조
 
@@ -260,10 +263,12 @@ public class PlayerMovement : MonoBehaviour
     private void UpdateAnimations()
     {
         // 1. 이동 입력 확인
-        float moveInput = 0f;
+        float moveInput = externalHorizontalInput; // 외부 입력부터 시작
         if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) moveInput -= 1f;
         if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) moveInput += 1f;
+        moveInput = Mathf.Clamp(moveInput, -1f, 1f); // 입력값을 -1, 0, 1로 제한
 
+        // Debug.Log($"<color=magenta>PlayerMovement: UpdateAnimations - 최종 moveInput: {moveInput}, externalHorizontalInput: {externalHorizontalInput}</color>");
         // 2. 애니메이터 파라미터 업데이트
         // [수정] Animator가 있을 때만 파라미터를 업데이트합니다.
         if (animator != null)
@@ -472,7 +477,7 @@ public class PlayerMovement : MonoBehaviour
         }
 
         // 1. 좌/우 입력 받기 (A, D키 또는 화살표 키) - 새로운 Input System 사용
-        float moveInput = 0f;
+        float moveInput = externalHorizontalInput; // 외부 입력부터 시작
         if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed)
         {
             moveInput -= 1f;
@@ -481,7 +486,10 @@ public class PlayerMovement : MonoBehaviour
         {
             moveInput += 1f;
         }
+        moveInput = Mathf.Clamp(moveInput, -1f, 1f); // 입력값을 -1, 0, 1로 제한
 
+        Debug.Log($"<color=magenta>PlayerMovement: FixedUpdate - 최종 moveInput: {moveInput}, externalHorizontalInput: {externalHorizontalInput}</color>");
+        HasHorizontalInput = (moveInput != 0f); // [추가] 수평 입력 상태 업데이트
         // [수정] 플레이어가 처음으로 움직였을 때 GameManager에 게임 시작을 알립니다.
         if (moveInput != 0f && GameManager.Instance != null && !GameManager.Instance.IsGameplayActive)
         {
@@ -956,12 +964,25 @@ public class PlayerMovement : MonoBehaviour
             GameManager.Instance.GameOver();
         }
 
+        // [추가] 사망 시 상호작용 관련 UI 및 상태를 초기화합니다.
+        // ResetInteractionState(); // 이 함수는 이제 인라인됩니다.
+        isReading = false;
+        if (narrationPanelUI != null) narrationPanelUI.SetActive(false);
+        if (interactionPromptUI != null) interactionPromptUI.SetActive(false);
+        currentInteractable = null;
+        
         // [수정] 카메라의 위치와 회전도 함께 초기화합니다.
         if (camRotation != null)
         {
             camRotation.ResetCamera();
         }
+        
+        // [추가] 사망 시 플레이어의 모든 렌더러를 원래 머티리얼로 복구합니다.
+        SetMaterialState(null);
+        currentOcclusionState = OcclusionState.None;
     }
+
+
 
     /// <summary>
     /// [새로운 기능] 상호작용 입력을 처리합니다.
