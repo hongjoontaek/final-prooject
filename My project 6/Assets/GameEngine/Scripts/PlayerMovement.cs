@@ -69,6 +69,7 @@ public class PlayerMovement : MonoBehaviour
     private bool isDropping = false; // 현재 아래로 내려가는 중인지 상태를 저장할 변수
     private Vector3 initialPosition; // 초기 스폰 위치를 저장할 변수
     public float externalHorizontalInput { get; set; } = 0f; // [추가] 외부에서 주입되는 수평 이동 입력 (-1: 왼쪽, 0: 없음, 1: 오른쪽)
+    public float externalVerticalInput { get; set; } = 0f; // [추가] 외부에서 주입되는 수직 이동 입력 (-1: 뒤, 0: 없음, 1: 앞)
     public bool HasHorizontalInput { get; private set; } // [추가] 플레이어가 수평 입력을 하고 있는지 여부
     private bool wasCameraRotating = false; // 이전 프레임에서 카메라가 회전 중이었는지 확인
     private Animator animator; // [추가] 애니메이터 컴포넌트 참조
@@ -213,7 +214,7 @@ public class PlayerMovement : MonoBehaviour
         // 2. 점프 (바닥에 있을 때만 점프 가능)
         bool isDownPressed = Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed;
 
-        // 카메라가 회전 중이 아닐 때만 점프 입력을 받습니다.
+        // 카메라가 회전 중이 아닐 때만 점프 입력을 받습니다. (점프 패드는 이 조건 무시)
         if (Keyboard.current.spaceKey.wasPressedThisFrame && isGrounded && !camRotation.IsRotating)
         {
             // [로그 1] 점프 입력이 들어왔을 때, 아래 키가 눌렸는지 확인합니다.
@@ -227,7 +228,7 @@ public class PlayerMovement : MonoBehaviour
             }
             else // 그렇지 않으면 일반 점프 요청
             {
-                Debug.Log("점프 입력 감지! (isGrounded: " + isGrounded + ")");
+                Debug.Log("일반 점프 입력 감지! (isGrounded: " + isGrounded + ")");
                 jumpRequested = true; // 점프 요청을 기록
                 // [추가] 점프 애니메이션 트리거 실행
                 if (animator != null) animator.SetTrigger("Jump");
@@ -263,43 +264,57 @@ public class PlayerMovement : MonoBehaviour
     private void UpdateAnimations()
     {
         // 1. 이동 입력 확인
-        float moveInput = externalHorizontalInput; // 외부 입력부터 시작
-        if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) moveInput -= 1f;
-        if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) moveInput += 1f;
-        moveInput = Mathf.Clamp(moveInput, -1f, 1f); // 입력값을 -1, 0, 1로 제한
+        float horizontalInput = externalHorizontalInput; // 외부 수평 입력부터 시작
+        if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) horizontalInput -= 1f;
+        if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) horizontalInput += 1f;
+        horizontalInput = Mathf.Clamp(horizontalInput, -1f, 1f); // 입력값을 -1, 0, 1로 제한
 
-        // Debug.Log($"<color=magenta>PlayerMovement: UpdateAnimations - 최종 moveInput: {moveInput}, externalHorizontalInput: {externalHorizontalInput}</color>");
+        float verticalInput = externalVerticalInput; // 외부 수직 입력부터 시작
+        // 만약 플레이어가 직접 W/S 키로 앞뒤 이동을 제어한다면 여기에 추가:
+        // if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) verticalInput += 1f;
+        // if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) verticalInput -= 1f;
+        verticalInput = Mathf.Clamp(verticalInput, -1f, 1f);
+
+        bool isMoving = (horizontalInput != 0f || verticalInput != 0f);
+
+        // Debug.Log($"<color=magenta>PlayerMovement: UpdateAnimations - 최종 horizontalInput: {horizontalInput}, externalHorizontalInput: {externalHorizontalInput}, verticalInput: {verticalInput}, externalVerticalInput: {externalVerticalInput}</color>");
         // 2. 애니메이터 파라미터 업데이트
         // [수정] Animator가 있을 때만 파라미터를 업데이트합니다.
         if (animator != null)
         {
             // 이동 입력이 있으면 IsRunning을 true로 설정
             // [수정] 점프 중(공중)에는 달리기 애니메이션이 재생되지 않도록 isGrounded 조건을 추가합니다.
-            animator.SetBool("IsRunning", isGrounded && moveInput != 0);
+            animator.SetBool("IsRunning", isGrounded && isMoving);
             // 바닥에 닿아있는지 여부를 IsGrounded로 설정 (점프/착지 전환용)
             animator.SetBool("IsGrounded", isGrounded);
         }
 
         // 3. 캐릭터 모델 회전 (이동 방향 바라보기)
         // [수정] 입력에 따라 즉시 회전하도록 단순화했습니다.
-        if (modelTransform != null)
         // [수정] 모델이 루트 오브젝트(Player)와 같으면 회전시키지 않습니다. (CameraRotation과 충돌 방지)
         if (modelTransform != null && modelTransform != transform)
         {
             Quaternion targetRotation = Quaternion.Euler(0, 180, 0); // 기본값: 정면(180도)
 
-            if (moveInput > 0) // 오른쪽 입력 (D키)
+            if (isMoving)
+            {
+                // 수평 입력이 우선합니다.
+                if (horizontalInput > 0) // 오른쪽 입력 (D키)
             {
                 // [수정] 완전 측면(90도) 대신 설정된 각도(예: 135도)를 사용하여 얼굴이 보이게 합니다.
                 targetRotation = Quaternion.Euler(0, runRotationAngle, 0);
             }
-            else if (moveInput < 0) // 왼쪽 입력 (A키)
+            else if (horizontalInput < 0) // 왼쪽 입력 (A키)
             {
                 targetRotation = Quaternion.Euler(0, -runRotationAngle, 0);
             }
-            // else의 경우 targetRotation이 이미 180(정면)으로 초기화되어 있으므로 생략 가능
-            // 또한, 이전에 있던 modelTransform.localRotation 직접 할당 코드를 제거하여 Slerp가 정상 작동하게 합니다.
-
+                else if (verticalInput != 0f) // 수평 입력이 없고 수직 입력만 있을 경우
+                {
+                    // verticalInput이 1이면 카메라 기준 '앞'으로 이동 (플레이어 모델은 카메라로부터 멀어지는 방향)
+                    // verticalInput이 -1이면 카메라 기준 '뒤'로 이동 (플레이어 모델은 카메라를 바라보는 방향)
+                    targetRotation = Quaternion.Euler(0, verticalInput > 0 ? 180 : 0, 0);
+                }
+            }
             // [수정] Slerp를 사용하여 부드럽게 회전시킵니다.
             modelTransform.localRotation = Quaternion.Slerp(modelTransform.localRotation, targetRotation, modelRotationSpeed * Time.deltaTime);
         }
@@ -477,27 +492,31 @@ public class PlayerMovement : MonoBehaviour
         }
 
         // 1. 좌/우 입력 받기 (A, D키 또는 화살표 키) - 새로운 Input System 사용
-        float moveInput = externalHorizontalInput; // 외부 입력부터 시작
-        if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed)
-        {
-            moveInput -= 1f;
-        }
-        if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed)
-        {
-            moveInput += 1f;
-        }
-        moveInput = Mathf.Clamp(moveInput, -1f, 1f); // 입력값을 -1, 0, 1로 제한
+        float horizontalMoveInput = externalHorizontalInput; // 외부 수평 입력부터 시작
+        if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) horizontalMoveInput -= 1f;
+        if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) horizontalMoveInput += 1f;
+        horizontalMoveInput = Mathf.Clamp(horizontalMoveInput, -1f, 1f); // 입력값을 -1, 0, 1로 제한
 
-        Debug.Log($"<color=magenta>PlayerMovement: FixedUpdate - 최종 moveInput: {moveInput}, externalHorizontalInput: {externalHorizontalInput}</color>");
-        HasHorizontalInput = (moveInput != 0f); // [추가] 수평 입력 상태 업데이트
+        float verticalMoveInput = externalVerticalInput; // 외부 수직 입력부터 시작
+        // 만약 플레이어가 직접 W/S 키로 앞뒤 이동을 제어한다면 여기에 추가:
+        // if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) verticalMoveInput += 1f;
+        // if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) verticalMoveInput -= 1f;
+        verticalMoveInput = Mathf.Clamp(verticalMoveInput, -1f, 1f);
+
+        Debug.Log($"<color=magenta>PlayerMovement: FixedUpdate - 최종 horizontalMoveInput: {horizontalMoveInput}, externalHorizontalInput: {externalHorizontalInput}, verticalMoveInput: {verticalMoveInput}, externalVerticalInput: {externalVerticalInput}</color>");
+        HasHorizontalInput = (horizontalMoveInput != 0f || verticalMoveInput != 0f); // [추가] 수평 또는 수직 입력 상태 업데이트
         // [수정] 플레이어가 처음으로 움직였을 때 GameManager에 게임 시작을 알립니다.
-        if (moveInput != 0f && GameManager.Instance != null && !GameManager.Instance.IsGameplayActive)
+        if ((horizontalMoveInput != 0f || verticalMoveInput != 0f) && GameManager.Instance != null && !GameManager.Instance.IsGameplayActive)
         {
             GameManager.Instance.StartGameplay();
         }
 
         // 게임이 아직 시작되지 않았다면 움직이지 않습니다.
-        if (GameManager.Instance != null && !GameManager.Instance.IsGameplayActive) moveInput = 0f;
+        if (GameManager.Instance != null && !GameManager.Instance.IsGameplayActive)
+        {
+            horizontalMoveInput = 0f;
+            verticalMoveInput = 0f;
+        }
 
         // 2. 현재 Rigidbody의 속도를 가져와 Y축 속도(중력, 점프)는 그대로 유지
         // Y축 속도는 그대로 두고, X와 Z축 속도만 새로 계산합니다.
@@ -506,31 +525,25 @@ public class PlayerMovement : MonoBehaviour
         // --- 여기가 FEZ 로직의 핵심 ---
         // 3. 카메라 뷰에 따라 '좌우' 입력을 X축 또는 Z축 속도로 변환
         //    카메라가 회전하면 플레이어의 '좌우' 개념도 카메라 시점에 맞춰 바뀝니다.
-        
-        Vector3 velocity = Vector3.zero;
 
-        // CameraRotation 스크립트의 currentView 값에 따라 이동 방향을 결정
-        switch (camRotation.currentView)
-        {
-            case CameraRotation.CameraView.Front: // 카메라가 정면(Z- 방향)을 볼 때
-                velocity.x = moveInput * speed; // '오른쪽'은 +X축 방향
-                break;
-            case CameraRotation.CameraView.Right: // 카메라가 우측(X+ 방향)을 볼 때
-                velocity.z = -moveInput * speed; // '오른쪽'은 -Z축 방향
-                break;
-            case CameraRotation.CameraView.Back:  // 카메라가 후면(Z+ 방향)을 볼 때
-                velocity.x = -moveInput * speed; // '오른쪽'은 -X축 방향
-                break;
-            case CameraRotation.CameraView.Left:  // 카메라가 좌측(X- 방향)을 볼 때
-                velocity.z = moveInput * speed; // '오른쪽'은 +Z축 방향
-                break;
-        }
+        // 카메라의 forward와 right 벡터를 XZ 평면에 투영하여 이동 방향을 계산합니다.
+        Vector3 cameraForward = camRotation.transform.forward;
+        cameraForward.y = 0;
+        cameraForward.Normalize();
 
+        Vector3 cameraRight = camRotation.transform.right;
+        cameraRight.y = 0;
+        cameraRight.Normalize();
+
+        // 최종 이동 방향 벡터 (카메라 시점 기준)
+        Vector3 moveDirection = (cameraRight * horizontalMoveInput + cameraForward * verticalMoveInput);
+
+        Vector3 velocity = moveDirection * speed;
         // Y축 속도를 다시 합쳐줍니다.
         velocity.y = yVelocity;
 
         // --- [새로운 로직] 지상에서 수평 이동 시 더 나은 발판으로 자동 이동 ---
-        if (isGrounded && moveInput != 0)
+        if (isGrounded && (horizontalMoveInput != 0 || verticalMoveInput != 0))
         {
             // 1. 현재 위치에서 착지 가능한 모든 발판을 찾습니다.
             Vector3 boxCenter = transform.position + Vector3.up * 0.1f;
@@ -617,7 +630,7 @@ public class PlayerMovement : MonoBehaviour
         // 5. 점프 요청이 있었으면 여기서 실제 점프를 실행합니다.
         if (jumpRequested)
         {
-            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+            ApplyJumpForce(); // 일반 점프 실행
             jumpRequested = false; // 요청을 처리했으므로 초기화
         }
 
@@ -632,6 +645,20 @@ public class PlayerMovement : MonoBehaviour
         else if (rb.linearVelocity.y > 0)
         {
             rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.deltaTime;
+        }
+    }
+    
+    /// <summary>
+    /// 플레이어에게 점프력을 적용합니다. 외부 스크립트(예: JumpPad)에서 호출할 수 있습니다.
+    /// </summary>
+    /// <param name="forceMultiplier">기본 jumpForce에 곱할 배율입니다. 1f는 일반 점프입니다.</param>
+    public void ApplyJumpForce(float forceMultiplier = 1f)
+    {
+        if (isGrounded) // 바닥에 닿아있을 때만 점프 가능
+        {
+            rb.AddForce(Vector3.up * jumpForce * forceMultiplier, ForceMode.Impulse);
+            Debug.Log($"<color=blue>점프 발동! (Force Multiplier: {forceMultiplier})</color>");
+            if (animator != null) animator.SetTrigger("Jump"); // 점프 애니메이션 트리거
         }
     }
 

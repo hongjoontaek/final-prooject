@@ -21,11 +21,11 @@ public class BreakablePlatform : MonoBehaviour
     [Tooltip("발판이 부서질 때 재생할 사운드")]
     public AudioClip breakSound;
 
-    private Vector3 initialPosition; // 발판의 초기 위치 (리스폰 시 사용)
+    private Vector3 initialPosition;    // 발판의 초기 위치 (리스폰 시 사용)
     private Quaternion initialRotation; // 발판의 초기 회전 (리스폰 시 사용)
     private Vector3 initialLocalPosition; // 흔들림을 위해 초기 로컬 위치 저장
     private bool isBroken = false; // 현재 발판이 부서진 상태인지
-    private Renderer platformRenderer; // 발판의 렌더러 컴포넌트
+    private Renderer[] platformRenderers; // 발판의 모든 렌더러 컴포넌트
     private Collider platformCollider; // 발판의 콜라이더 컴포넌트
     private AudioSource audioSource; // 오디오 재생을 위한 AudioSource
 
@@ -35,12 +35,13 @@ public class BreakablePlatform : MonoBehaviour
         initialRotation = transform.rotation;
         initialLocalPosition = transform.localPosition; // 로컬 위치 저장
 
-        // 렌더러와 콜라이더 컴포넌트 가져오기 (Inspector에서 할당되지 않았다면)
-        platformRenderer = GetComponentInChildren<Renderer>(); // 하위 객체에서도 렌더러를 찾도록 변경
+        // 모든 렌더러와 콜라이더 컴포넌트 가져오기
+        platformRenderers = GetComponentsInChildren<Renderer>(); // 모든 하위 렌더러를 가져옴
         platformCollider = GetComponent<Collider>();
-        if (platformRenderer == null || platformCollider == null)
+        if (platformRenderers.Length == 0 || platformCollider == null) // 렌더러가 하나도 없거나 콜라이더가 없으면 에러
         {
             Debug.LogError("BreakablePlatform 스크립트는 Renderer와 Collider 컴포넌트가 필요합니다! 해당 GameObject에 컴포넌트가 있는지 확인해주세요.", this);
+            enabled = false; // 스크립트 비활성화
         }
 
         // AudioSource 컴포넌트 가져오기 (없으면 추가)
@@ -89,7 +90,10 @@ public class BreakablePlatform : MonoBehaviour
 
         // 발판을 비활성화하여 사라지게 합니다.
         // [수정] GameObject를 비활성화하는 대신 렌더러와 콜라이더만 비활성화합니다.
-        if (platformRenderer != null) platformRenderer.enabled = false;
+        foreach (Renderer r in platformRenderers) // 모든 렌더러 비활성화
+        {
+            if (r != null) r.enabled = false;
+        }
         if (platformCollider != null) platformCollider.enabled = false;
         Debug.Log($"{gameObject.name}: 부서졌습니다.");
 
@@ -106,8 +110,11 @@ public class BreakablePlatform : MonoBehaviour
         StopAllCoroutines(); // 혹시 진행 중인 코루틴이 있다면 중지
         transform.position = initialPosition;
         transform.rotation = initialRotation;
-        if (platformRenderer != null) platformRenderer.enabled = true; // 렌더러 다시 활성화
-        if (platformCollider != null) platformCollider.enabled = true;   // 콜라이더 다시 활성화
+        foreach (Renderer r in platformRenderers) // 모든 렌더러 다시 활성화
+        {
+            if (r != null) r.enabled = true;
+        }
+        if (platformCollider != null) platformCollider.enabled = true; // 콜라이더 다시 활성화
         isBroken = false; // 부서진 상태 해제
         Debug.Log($"{gameObject.name}: ResetPlatform() 호출로 초기화되었습니다.");
     }

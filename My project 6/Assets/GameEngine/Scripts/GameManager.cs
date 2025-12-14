@@ -189,7 +189,7 @@ public class GameManager : MonoBehaviour
         // [수정] 게임 플레이 상태를 초기화하여, 플레이어가 다시 움직여야 구름이 시작되도록 합니다.
         IsGameplayActive = false;
         // [추가] 씬에 있는 모든 부서지는 발판을 찾아서 초기화합니다.
-        BreakablePlatform[] platforms = FindObjectsOfType<BreakablePlatform>();
+        BreakablePlatform[] platforms = FindObjectsByType<BreakablePlatform>(FindObjectsSortMode.None);
         foreach (BreakablePlatform platform in platforms)
         {
             platform.ResetPlatform();

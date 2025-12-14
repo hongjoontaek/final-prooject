@@ -5,7 +5,7 @@ using UnityEngine;
 /// </summary>
 public class SlipperyPlatform : MonoBehaviour
 {
-    public enum SlideDirection { Left, Right }
+    public enum SlideDirection { Left, Right, Forward, Backward }
 
     [Header("미끄러운 발판 설정")]
     [Tooltip("플레이어가 미끄러질 방향 (카메라 시점 기준)")]
@@ -35,9 +35,26 @@ public class SlipperyPlatform : MonoBehaviour
             if (playerMovement != null) // PlayerMovement 스크립트가 플레이어 오브젝트에 있다면
             {
                 // 플레이어의 externalHorizontalInput을 설정하여 미끄러지는 효과를 줍니다.
-                // -1은 왼쪽, 1은 오른쪽을 의미합니다.
-                playerMovement.externalHorizontalInput = (slideDirection == SlideDirection.Left) ? -1f : 1f;
-                Debug.Log($"<color=cyan>SlipperyPlatform '{gameObject.name}': 플레이어를 {slideDirection} 방향으로 이동시킵니다. (externalHorizontalInput: {playerMovement.externalHorizontalInput})</color>", this);
+                // 미끄러지는 방향에 따라 externalHorizontalInput 또는 externalVerticalInput을 설정합니다.
+                playerMovement.externalHorizontalInput = 0f; // 다른 방향의 입력은 초기화
+                playerMovement.externalVerticalInput = 0f; // 다른 방향의 입력은 초기화
+
+                switch (slideDirection)
+                {
+                    case SlideDirection.Left:
+                        playerMovement.externalHorizontalInput = -1f; // 왼쪽
+                        break;
+                    case SlideDirection.Right:
+                        playerMovement.externalHorizontalInput = 1f; // 오른쪽
+                        break;
+                    case SlideDirection.Forward:
+                        playerMovement.externalVerticalInput = 1f; // 앞 (카메라 기준)
+                        break;
+                    case SlideDirection.Backward:
+                        playerMovement.externalVerticalInput = -1f; // 뒤 (카메라 기준)
+                        break;
+                }
+                Debug.Log($"<color=cyan>SlipperyPlatform '{gameObject.name}': 플레이어를 {slideDirection} 방향으로 이동시킵니다. (externalHorizontalInput: {playerMovement.externalHorizontalInput}, externalVerticalInput: {playerMovement.externalVerticalInput})</color>", this);
             }
             else
             {
@@ -60,8 +77,9 @@ public class SlipperyPlatform : MonoBehaviour
             PlayerMovement playerMovement = collision.gameObject.GetComponent<PlayerMovement>();
             if (playerMovement != null)
             {
-                // 플레이어의 externalHorizontalInput을 0으로 초기화하여 미끄러지는 효과를 중지합니다.
+                // 플레이어의 externalHorizontalInput과 externalVerticalInput을 0으로 초기화하여 미끄러지는 효과를 중지합니다.
                 playerMovement.externalHorizontalInput = 0f;
+                playerMovement.externalVerticalInput = 0f;
                 Debug.Log($"<color=cyan>SlipperyPlatform '{gameObject.name}': 플레이어가 발판에서 벗어났습니다. externalHorizontalInput을 0으로 초기화합니다.</color>", this);
             } else {
                 Debug.LogWarning($"<color=red>SlipperyPlatform '{gameObject.name}': OnCollisionExit에서 플레이어 '{collision.gameObject.name}'의 PlayerMovement 스크립트를 찾을 수 없습니다!</color>", this);
