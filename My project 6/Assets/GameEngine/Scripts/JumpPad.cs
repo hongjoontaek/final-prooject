@@ -21,7 +21,7 @@ public class JumpPad : MonoBehaviour
         Collider col = GetComponent<Collider>();
         if (col == null || !col.isTrigger)
         {
-            Debug.LogWarning($"JumpPad '{gameObject.name}': Collider가 없거나 Trigger로 설정되어 있지 않습니다. Trigger로 설정해주세요!", this);
+            // Debug.LogWarning($"JumpPad '{gameObject.name}': Collider 컴포넌트가 없거나 Trigger로 설정되어 있지 않습니다. 점프 패드가 작동하지 않을 수 있습니다.");
         }
 
         audioSource = GetComponent<AudioSource>();
@@ -43,8 +43,7 @@ public class JumpPad : MonoBehaviour
                 if (audioSource != null && jumpSound != null)
                 {
                     audioSource.PlayOneShot(jumpSound); // 점프 사운드 재생
-                }
-                Debug.Log($"<color=yellow>JumpPad '{gameObject.name}': 플레이어가 슈퍼 점프했습니다!</color>", this);
+                }                
             }
         }
     }

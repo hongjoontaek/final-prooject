@@ -26,7 +26,7 @@ public class RisingCloud : MonoBehaviour
         }
         else
         {
-            Debug.LogError("씬에서 'Player' 태그를 가진 오브젝트를 찾을 수 없습니다! 플레이어에 'Player' 태그를 설정해주세요.");
+            // Debug.LogError("RisingCloud: 'Player' 태그를 가진 오브젝트를 찾을 수 없습니다! 스크립트를 비활성화합니다.");
             enabled = false; // 플레이어가 없으면 스크립트 비활성화
         }
     }
@@ -47,7 +47,7 @@ public class RisingCloud : MonoBehaviour
             if (transform.position.y > playerTransform.position.y)
             {
                 isPlayerCaught = true; // 잡혔다고 표시
-                Debug.Log("구름이 플레이어를 따라잡았습니다!");
+                // Debug.Log("플레이어가 구름에 잡혔습니다!");
 
                 // GameManager에 구름으로 인한 사망 처리를 요청
                 if (GameManager.Instance != null)

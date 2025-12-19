@@ -15,7 +15,7 @@ public class SlipperyPlatform : MonoBehaviour
 
     void Start()
     {
-        Debug.Log($"<color=green>SlipperyPlatform '{gameObject.name}' 시작됨.</color>", this);
+        // Debug.Log($"SlipperyPlatform '{gameObject.name}' 초기화됨.");
         // 이 스크립트는 더 이상 CameraRotation을 직접 참조할 필요가 없습니다.
         // PlayerMovement 스크립트의 externalHorizontalInput을 제어하여 플레이어의 이동을 유도합니다.
     }
@@ -54,14 +54,14 @@ public class SlipperyPlatform : MonoBehaviour
                         playerMovement.externalVerticalInput = -1f; // 뒤 (카메라 기준)
                         break;
                 }
-                Debug.Log($"<color=cyan>SlipperyPlatform '{gameObject.name}': 플레이어를 {slideDirection} 방향으로 이동시킵니다. (externalHorizontalInput: {playerMovement.externalHorizontalInput}, externalVerticalInput: {playerMovement.externalVerticalInput})</color>", this);
+                
             }
             else
-            {
-                Debug.LogWarning($"<color=red>SlipperyPlatform '{gameObject.name}': 플레이어 '{collision.gameObject.name}'에서 PlayerMovement 스크립트를 찾을 수 없습니다!</color>", this);
+            {                
+                // Debug.LogWarning($"<color=red>SlipperyPlatform '{gameObject.name}': 플레이어 '{collision.gameObject.name}'에서 PlayerMovement 스크립트를 찾을 수 없습니다!</color>", this);
             }
         }
-        // else
+        // else // Debug.Log($"<color=yellow>SlipperyPlatform '{gameObject.name}': 태그 불일치. 충돌 오브젝트 태그: {collision.gameObject.tag}</color>", this);
         // {
         //     Debug.Log($"<color=yellow>SlipperyPlatform '{gameObject.name}': 태그 불일치. 충돌 오브젝트 태그: {collision.gameObject.tag}</color>", this);
         // }
@@ -79,10 +79,10 @@ public class SlipperyPlatform : MonoBehaviour
             {
                 // 플레이어의 externalHorizontalInput과 externalVerticalInput을 0으로 초기화하여 미끄러지는 효과를 중지합니다.
                 playerMovement.externalHorizontalInput = 0f;
-                playerMovement.externalVerticalInput = 0f;
-                Debug.Log($"<color=cyan>SlipperyPlatform '{gameObject.name}': 플레이어가 발판에서 벗어났습니다. externalHorizontalInput을 0으로 초기화합니다.</color>", this);
-            } else {
-                Debug.LogWarning($"<color=red>SlipperyPlatform '{gameObject.name}': OnCollisionExit에서 플레이어 '{collision.gameObject.name}'의 PlayerMovement 스크립트를 찾을 수 없습니다!</color>", this);
+                playerMovement.externalVerticalInput = 0f;                
+                // Debug.Log($"<color=green>SlipperyPlatform '{gameObject.name}': 플레이어의 외부 입력이 0으로 초기화되었습니다.</color>", this);
+            } else {                
+                // Debug.LogWarning($"<color=red>SlipperyPlatform '{gameObject.name}': OnCollisionExit에서 플레이어 '{collision.gameObject.name}'의 PlayerMovement 스크립트를 찾을 수 없습니다!</color>", this);
             }
         }
     }

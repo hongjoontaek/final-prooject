@@ -40,7 +40,7 @@ public class BreakablePlatform : MonoBehaviour
         platformCollider = GetComponent<Collider>();
         if (platformRenderers.Length == 0 || platformCollider == null) // 렌더러가 하나도 없거나 콜라이더가 없으면 에러
         {
-            Debug.LogError("BreakablePlatform 스크립트는 Renderer와 Collider 컴포넌트가 필요합니다! 해당 GameObject에 컴포넌트가 있는지 확인해주세요.", this);
+            // Debug.LogError("BreakablePlatform: 렌더러 또는 콜라이더 컴포넌트를 찾을 수 없습니다! 스크립트를 비활성화합니다.");
             enabled = false; // 스크립트 비활성화
         }
 
@@ -67,7 +67,7 @@ public class BreakablePlatform : MonoBehaviour
     private IEnumerator BreakAndRespawn()
     {
         isBroken = true; // 부서진 상태로 변경
-        Debug.Log($"{gameObject.name}: 플레이어가 밟았습니다. {breakDelay}초 후 부서집니다.");
+        // Debug.Log($"<color=yellow>발판 '{gameObject.name}'이 부서지기 시작합니다.</color>");
 
         // 부서지는 사운드 재생
         if (audioSource != null && breakSound != null)
@@ -95,7 +95,7 @@ public class BreakablePlatform : MonoBehaviour
             if (r != null) r.enabled = false;
         }
         if (platformCollider != null) platformCollider.enabled = false;
-        Debug.Log($"{gameObject.name}: 부서졌습니다.");
+        // Debug.Log($"<color=green>발판 '{gameObject.name}'이 사라졌습니다.</color>");
 
         // 발판이 부서진 후에는 외부에서 ResetPlatform()을 호출하여 다시 나타나게 합니다.
         // 자동 리스폰 로직은 제거되었습니다.
@@ -116,6 +116,6 @@ public class BreakablePlatform : MonoBehaviour
         }
         if (platformCollider != null) platformCollider.enabled = true; // 콜라이더 다시 활성화
         isBroken = false; // 부서진 상태 해제
-        Debug.Log($"{gameObject.name}: ResetPlatform() 호출로 초기화되었습니다.");
+        // Debug.Log($"<color=green>발판 '{gameObject.name}'이 초기화되어 다시 나타났습니다.</color>");
     }
 }

@@ -24,13 +24,13 @@ public class PlayerOcclusion : MonoBehaviour
         }
         else
         {
-            Debug.LogError("플레이어 오브젝트 또는 자식 오브젝트에서 Renderer를 찾을 수 없습니다.");
+            // Debug.LogWarning("PlayerOcclusion: Renderer 컴포넌트를 찾을 수 없습니다! 스크립트를 비활성화합니다.");
             enabled = false;
         }
 
         if (silhouetteMaterial == null)
         {
-            Debug.LogError("Silhouette Material이 할당되지 않았습니다.");
+            // Debug.LogWarning("PlayerOcclusion: SilhouetteMaterial이 할당되지 않았습니다! 스크립트를 비활성화합니다.");
             enabled = false; // 세미콜론이 빠져있을 수 있습니다. 확인 후 추가해주세요.
         }
     }

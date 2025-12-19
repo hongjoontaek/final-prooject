@@ -48,7 +48,7 @@ public class MovingPlatform : MonoBehaviour
         Collider col = GetComponent<Collider>();
         if (col == null)
         {
-            Debug.LogWarning($"MovingPlatform '{gameObject.name}': Collider가 없습니다. BoxCollider를 추가합니다.", this);
+            // Debug.LogWarning($"MovingPlatform '{gameObject.name}': Collider 컴포넌트를 찾을 수 없습니다. BoxCollider를 추가합니다.");
             gameObject.AddComponent<BoxCollider>();
         }
     }
@@ -93,7 +93,7 @@ public class MovingPlatform : MonoBehaviour
         {
             // 플레이어를 발판의 자식으로 만듭니다. 이렇게 하면 플레이어가 발판과 함께 움직입니다.
             collision.transform.SetParent(transform);
-            Debug.Log($"<color=green>플레이어가 MovingPlatform '{gameObject.name}'에 탑승했습니다.</color>", this);
+            // Debug.Log($"<color=green>플레이어가 발판 '{gameObject.name}'에 올라섰습니다.</color>");
         }
     }
 
@@ -104,7 +104,7 @@ public class MovingPlatform : MonoBehaviour
         {
             // 플레이어의 부모를 해제합니다.
             collision.transform.SetParent(null);
-            Debug.Log($"<color=red>플레이어가 MovingPlatform '{gameObject.name}'에서 하차했습니다.</color>", this);
+            // Debug.Log($"<color=red>플레이어가 발판 '{gameObject.name}'에서 내려왔습니다.</color>");
         }
     }
 

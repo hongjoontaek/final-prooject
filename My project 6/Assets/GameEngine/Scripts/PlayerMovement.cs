@@ -8,16 +8,16 @@ public class PlayerMovement : MonoBehaviour
 
     [Header("Movement")]
     public float speed = 5f; // 플레이어 이동 속도
-    public float jumpForce = 7f; // 플레이어 점프 힘
-    public Transform modelTransform; // [추가] 회전시킬 캐릭터 모델 (설정하지 않으면 Animator가 있는 오브젝트 사용)
-    public float modelRotationSpeed = 15f; // [추가] 모델 회전 속도 (부드러운 회전을 위해 사용)
+    public float jumpForce = 7f; // 플레이어 점프 힘    
+    public Transform modelTransform; // 회전시킬 캐릭터 모델 (설정하지 않으면 Animator가 있는 오브젝트 사용)
+    // public float modelRotationSpeed = 15f; // 모델 회전 속도 (이제 즉시 회전하므로 필요 없음)
     public float runRotationAngle = 135f; // [추가] 달릴 때 바라볼 각도 (90: 완전 측면, 135: 대각선/얼굴 보임)
     public Transform headTransform; // [추가] 회전을 고정할 머리 트랜스폼 (Humanoid라면 자동 할당 시도)
     public bool lockHeadRotation = true; // [추가] 머리가 항상 카메라를 바라보게 할지 여부
     public Vector3 headRotationOffset; // [추가] 머리 회전 보정값 (머리가 삐뚤어지면 이 값을 조절하세요)
     [Header("Jump Physics")]
-    public float fallMultiplier = 2f; // 떨어질 때 적용할 중력 배수 (더 빨리 떨어지게 함)
-    public float lowJumpMultiplier = 2f; // 짧게 점프할 때 적용할 중력 배수
+    public float fallMultiplier = 5f; // 떨어질 때 적용할 중력 배수 (더 빨리 떨어지게 함)
+    public float lowJumpMultiplier = 5f; // 짧게 점프할 때 적용할 중력 배수
     public LayerMask wallLayer; // 벽으로 인식할 레이어 (차원 접힘 방지용)
 
     [Header("Ground Check")]
@@ -61,6 +61,9 @@ public class PlayerMovement : MonoBehaviour
     private InteractableSign currentInteractable; // 현재 상호작용 가능한 오브젝트
     private bool isReading = false; // 현재 나레이션을 읽고 있는지 상태
 
+    [Header("Ending")] // 새로운 헤더 추가
+    public LayerMask endingBlockLayer; // 엔딩 블록 레이어
+
     private Rigidbody rb; // 플레이어의 Rigidbody 컴포넌트
     private CameraRotation camRotation; // 메인 카메라에 붙어있는 CameraRotation 스크립트 참조
     private bool isGrounded; // 플레이어가 바닥에 닿아있는지 여부
@@ -71,8 +74,13 @@ public class PlayerMovement : MonoBehaviour
     public float externalHorizontalInput { get; set; } = 0f; // [추가] 외부에서 주입되는 수평 이동 입력 (-1: 왼쪽, 0: 없음, 1: 오른쪽)
     public float externalVerticalInput { get; set; } = 0f; // [추가] 외부에서 주입되는 수직 이동 입력 (-1: 뒤, 0: 없음, 1: 앞)
     public bool HasHorizontalInput { get; private set; } // [추가] 플레이어가 수평 입력을 하고 있는지 여부
+    [Tooltip("캐릭터 모델의 기본 앞 방향이 월드 Z축과 다를 경우 보정 회전값 (예: 모델이 X축을 바라보면 Y=90)")]
+    public Vector3 modelForwardOffset = Vector3.zero; // 모델의 앞 방향 보정 오프셋
+    private Vector3 currentMoveDirection; // 현재 이동 방향 (엔딩 모드용)
+    public bool IsInEndingMode { get; set; } = false; // 엔딩 모드인지 여부
+    private bool hasTriggeredEnding = false; // 엔딩이 한 번 트리거되었는지 여부
     private bool wasCameraRotating = false; // 이전 프레임에서 카메라가 회전 중이었는지 확인
-    private Animator animator; // [추가] 애니메이터 컴포넌트 참조
+    private Animator animator; // [추가] 애니메이터 컴포넌트 참조    
 
     // 게임 시작 시 1번 호출
     void Start()
@@ -82,7 +90,7 @@ public class PlayerMovement : MonoBehaviour
         if (rb == null)
         {
             Debug.LogError("Rigidbody 컴포넌트를 찾을 수 없습니다! PlayerMovement GameObject에 Rigidbody를 추가해주세요.");
-            enabled = false; // Rigidbody가 없으면 스크립트를 비활성화합니다.
+            enabled = false; // Rigidbody가 없으면 스크립트를 비활성화합니다.            
             return;
         }
         
@@ -105,7 +113,7 @@ public class PlayerMovement : MonoBehaviour
 
         if (allRenderers.Count == 0)
         {
-            Debug.LogError("플레이어 모델에서 Renderer를 하나도 찾을 수 없습니다!");
+            // Debug.LogWarning("PlayerMovement: 렌더러 컴포넌트를 찾을 수 없습니다! 플레이어가 보이지 않을 수 있습니다.");
         }
         // visibilityCheckTarget이 설정되지 않았다면, 플레이어 자기 자신을 타겟으로 설정합니다.
         if (visibilityCheckTarget == null)
@@ -117,6 +125,7 @@ public class PlayerMovement : MonoBehaviour
 
         // 4. [새로운 기능] 초기 위치 저장
         initialPosition = transform.position;
+        
         
         // [추가] 자식 오브젝트(3D 모델)에 있는 Animator 컴포넌트를 가져옵니다.
         animator = GetComponentInChildren<Animator>();
@@ -157,19 +166,19 @@ public class PlayerMovement : MonoBehaviour
         // [안전장치] 모델이 루트 오브젝트(Player)와 같다면 회전이 제대로 안 될 수 있음을 경고
         if (modelTransform == transform)
         {
-            Debug.LogWarning("주의: 'Model Transform'이 플레이어 최상위 오브젝트와 같습니다. 3D 모델을 자식 오브젝트로 분리해야 회전이 정상 작동합니다.");
+            // Debug.LogError("치명적 오류: 'Model Transform'이 Player(루트)와 같습니다! 회전이 작동하지 않습니다. 3D 모델을 자식 오브젝트로 분리하고 Model Transform에 할당해주세요.");
             Debug.LogError("치명적 오류: 'Model Transform'이 Player(루트)와 같습니다! 회전이 작동하지 않습니다. 3D 모델을 자식 오브젝트로 분리하고 Model Transform에 할당해주세요.");
         }
 
         // [추가] 머리 트랜스폼이 할당되지 않았고, 캐릭터가 Humanoid라면 자동으로 머리를 찾습니다.
         if (headTransform == null && animator != null && animator.isHuman)
         {
-            headTransform = animator.GetBoneTransform(HumanBodyBones.Head);
+            headTransform = animator.GetBoneTransform(HumanBodyBones.Head);            
         }
         
         if (lockHeadRotation && headTransform == null)
         {
-            Debug.LogWarning("Head Rotation Lock이 켜져 있지만, Head Transform을 찾을 수 없습니다. 인스펙터에서 할당해주세요.");
+            // Debug.LogWarning("Head Rotation Lock이 켜져 있지만, Head Transform을 찾을 수 없습니다. 인스펙터에서 할당해주세요.");
         }
 
         // [추가] 점프 애니메이션 속도를 물리 점프 시간에 맞춰 동기화합니다.
@@ -203,6 +212,12 @@ public class PlayerMovement : MonoBehaviour
             return;
         }
 
+        // 엔딩 모드일 경우, 2D 게임 로직 대신 3D 이동 로직을 사용합니다.
+        if (IsInEndingMode)
+        {
+            HandleEndingMovementUpdate();
+            return;
+        }
         // 1. 바닥 체크 로직 호출 (기본 체크 및 차원 접힘 체크 포함)
         CheckGrounded(); // 새로운 바닥 체크 함수 호출
         // (확인용) Scene 뷰에 빨간색 레이저를 그려 바닥 체크가 어디서 이루어지는지 시각적으로 보여줍니다.
@@ -214,19 +229,19 @@ public class PlayerMovement : MonoBehaviour
         // 2. 점프 (바닥에 있을 때만 점프 가능)
         bool isDownPressed = Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed;
 
-        // 카메라가 회전 중이 아닐 때만 점프 입력을 받습니다. (점프 패드는 이 조건 무시)
+        // 카메라가 회전 중이 아닐 때만 점프 입력을 받습니다. (점프 패드는 이 조건 무시)        
         if (Keyboard.current.spaceKey.wasPressedThisFrame && isGrounded && !camRotation.IsRotating)
         {
             // [로그 1] 점프 입력이 들어왔을 때, 아래 키가 눌렸는지 확인합니다.
-            Debug.Log($"[입력 감지] 점프 시도! isDownPressed: {isDownPressed}");
+            // Debug.Log("점프 입력 감지! (아래 키 눌림: " + isDownPressed + ")");
 
             // 아래 방향키를 누르고 점프하면 '아래로 내려가기' 요청
             if (isDownPressed)
             {
                 dropRequested = true;
-                Debug.Log("<color=orange>[요청] 아래로 내려가기(dropRequested)가 true로 설정됨.</color>");
-            }
-            else // 그렇지 않으면 일반 점프 요청
+                // Debug.Log("아래로 내려가기 요청 감지!");
+            }            
+            else // 그렇지 않으면 일반 점프 요청            
             {
                 Debug.Log("일반 점프 입력 감지! (isGrounded: " + isGrounded + ")");
                 jumpRequested = true; // 점프 요청을 기록
@@ -237,6 +252,40 @@ public class PlayerMovement : MonoBehaviour
 
         // 3. 벽 잡기 체크 (공중에 있고, 위로 올라가는 중일 때만)
         CheckLedge();
+
+        // 4. [새로운 기능] 추락 및 착지 감지
+        HandleFallDetection();
+    }
+
+    /// <summary>
+    /// 엔딩 모드일 때의 Update 로직을 처리합니다.
+    /// </summary>
+    private void HandleEndingMovementUpdate()
+    {
+        // 바닥 체크
+        CheckGrounded();
+
+        // 점프 입력 (필요하다면)
+        if (Keyboard.current.spaceKey.wasPressedThisFrame && isGrounded)
+        {
+            jumpRequested = true;
+            if (animator != null) animator.SetTrigger("Jump");
+        }
+
+        // [추가] 애니메이션 상태 업데이트 (달리기, 점프 상태 등)
+        UpdateAnimations();
+
+        // [새로운 기능] 상호작용 처리
+        HandleInteraction();
+
+        // [새로운 기능] 플레이어가 벽에 가려졌는지 확인하고 머티리얼을 교체합니다.
+        HandleVisibility();
+
+        // 벽 오르기 중에는 다른 모든 로직을 무시합니다.
+        if (isClimbing) return;
+
+        // 나레이션을 읽는 중에는 다른 모든 입력을 무시합니다.
+        if (isReading) return;
 
         // 4. [새로운 기능] 추락 및 착지 감지
         HandleFallDetection();
@@ -263,6 +312,12 @@ public class PlayerMovement : MonoBehaviour
     // [추가] 애니메이션 파라미터 업데이트 및 캐릭터 모델 회전 처리
     private void UpdateAnimations()
     {
+        // 엔딩 모드일 경우, 3D 이동 애니메이션 로직을 사용합니다.
+        if (IsInEndingMode)
+        {
+            HandleEndingAnimationUpdate();
+            return;
+        }
         // 1. 이동 입력 확인
         float horizontalInput = externalHorizontalInput; // 외부 수평 입력부터 시작
         if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) horizontalInput -= 1f;
@@ -277,7 +332,7 @@ public class PlayerMovement : MonoBehaviour
 
         bool isMoving = (horizontalInput != 0f || verticalInput != 0f);
 
-        // Debug.Log($"<color=magenta>PlayerMovement: UpdateAnimations - 최종 horizontalInput: {horizontalInput}, externalHorizontalInput: {externalHorizontalInput}, verticalInput: {verticalInput}, externalVerticalInput: {externalVerticalInput}</color>");
+        
         // 2. 애니메이터 파라미터 업데이트
         // [수정] Animator가 있을 때만 파라미터를 업데이트합니다.
         if (animator != null)
@@ -315,10 +370,53 @@ public class PlayerMovement : MonoBehaviour
                     targetRotation = Quaternion.Euler(0, verticalInput > 0 ? 180 : 0, 0);
                 }
             }
-            // [수정] Slerp를 사용하여 부드럽게 회전시킵니다.
-            modelTransform.localRotation = Quaternion.Slerp(modelTransform.localRotation, targetRotation, modelRotationSpeed * Time.deltaTime);
+            // [수정] 즉시 회전하도록 변경합니다.
+            modelTransform.localRotation = targetRotation;
         }
     }
+
+    /// <summary>
+    /// 엔딩 모드일 때의 애니메이션 업데이트 로직을 처리합니다.
+    /// </summary>
+    private void HandleEndingAnimationUpdate()
+    {
+        // WASD 입력 받기
+        float horizontalInput = Keyboard.current.aKey.isPressed ? -1f : (Keyboard.current.dKey.isPressed ? 1f : 0f);
+        float verticalInput = Keyboard.current.sKey.isPressed ? -1f : (Keyboard.current.wKey.isPressed ? 1f : 0f);
+
+        bool isMoving = (horizontalInput != 0f || verticalInput != 0f);
+
+        // 애니메이터 파라미터 업데이트
+        if (animator != null)
+        {
+            animator.SetBool("IsRunning", isGrounded && isMoving);
+            animator.SetBool("IsGrounded", isGrounded);
+        }
+
+        // 캐릭터 모델 회전 (이동 방향 바라보기)
+        if (modelTransform != null && modelTransform != transform)
+        {
+            if (isMoving)
+            {
+                // 카메라의 forward와 right 벡터를 XZ 평면에 투영
+                Vector3 cameraForward = camRotation.transform.forward;
+                cameraForward.y = 0f;
+                cameraForward.Normalize();
+
+                Vector3 cameraRight = camRotation.transform.right;
+                cameraRight.y = 0f;
+                cameraRight.Normalize();
+                
+                Vector3 moveDirection = (cameraForward * verticalInput + cameraRight * horizontalInput).normalized; // 이동 방향 계산
+                // Debugging: Check the calculated move direction and target rotation
+                // Debug.Log($"<color=blue>Ending Mode: Move Direction: {moveDirection}, Target Rotation Euler: {(Quaternion.LookRotation(moveDirection) * Quaternion.Euler(modelForwardOffset)).eulerAngles}</color>");
+
+                Quaternion targetRotation = Quaternion.LookRotation(moveDirection);
+                modelTransform.rotation = targetRotation * Quaternion.Euler(modelForwardOffset); // 즉시 회전
+            }
+        }
+    }
+
 
      private void CheckGrounded()
      {
@@ -331,10 +429,10 @@ public class PlayerMovement : MonoBehaviour
          }
          
          // 1. [수정] 기본 바닥 체크 (Raycast -> SphereCast로 변경)
-         // 발바닥(Pivot)보다 약간 위(0.5f)에서 시작하여 아래로 두꺼운(반지름 0.3f) 빔을 쏩니다.
-         // 이렇게 하면 다리 사이나 발 끝부분도 바닥으로 잘 인식합니다.
+         // Use combined layer mask for both modes
+         LayerMask combinedGroundLayers = groundLayer | endingBlockLayer;
          Vector3 castOrigin = transform.position + Vector3.up * 0.5f;
-         bool basicHit = Physics.SphereCast(castOrigin, 0.3f, Vector3.down, out RaycastHit hitInfo, groundCheckDistance, groundLayer);
+         bool basicHit = Physics.SphereCast(castOrigin, 0.3f, Vector3.down, out RaycastHit hitInfo, groundCheckDistance, combinedGroundLayers);
          
          if (basicHit)
          {
@@ -343,6 +441,8 @@ public class PlayerMovement : MonoBehaviour
          }
  
          // 2. "차원 접힘" 바닥 체크 (공중에 있을 때만 작동) - 시작 위치를 약간 위로 조정
+         if (!IsInEndingMode) // 엔딩 모드에서는 차원 접힘 로직을 사용하지 않습니다.
+         {
          Vector3 boxCenter = transform.position + Vector3.up * 0.5f; 
          Vector3 halfExtents; // 판의 크기 (X, Y, Z)
          float maxDistance = groundCheckDistance; // 얼마나 아래까지 체크할지
@@ -360,7 +460,7 @@ public class PlayerMovement : MonoBehaviour
          }
  
          // BoxCastAll: 보이지 않는 상자를 쏴서 충돌하는 '모든' 오브젝트를 감지합니다.
-         RaycastHit[] hits = Physics.BoxCastAll(boxCenter, halfExtents, Vector3.down, Quaternion.identity, maxDistance, groundLayer);
+         RaycastHit[] hits = Physics.BoxCastAll(boxCenter, halfExtents, Vector3.down, Quaternion.identity, maxDistance, combinedGroundLayers);
  
          // 감지된 발판이 없다면, 공중에 있는 것으로 처리하고 함수 종료
          if (hits.Length == 0)
@@ -441,6 +541,7 @@ public class PlayerMovement : MonoBehaviour
              return;
          }
  
+         } // End of if (!IsInEndingMode)
          isGrounded = false;
      }
 
@@ -459,11 +560,17 @@ public class PlayerMovement : MonoBehaviour
             return;
         }
 
+        // 엔딩 모드일 경우, 2D 게임 로직 대신 3D 이동 로직을 사용합니다.
+        if (IsInEndingMode)
+        {
+            HandleEndingMovementFixedUpdate();
+            return;
+        }
         // --- [수정된 로직] One-Way Platform 처리 ---
         // 아래로 내려가는 중이 아닐 때만, 위로 점프해서 발판을 통과할 수 있도록 합니다.
         if (!dropRequested)
         {
-            // [로그 2-A] 이 로그가 계속 보인다면, dropRequested가 true로 설정되지 않았거나 이미 처리된 후입니다.
+            // [로그 2-A] 이 로그가 계속 보인다면, dropRequested가 true로 설정되지 않았거나 이미 처리된 후입니다.            
             // Debug.Log("[FixedUpdate] 일반 충돌 처리 실행 중 (dropRequested == false)");
 
             // 플레이어가 위로 점프하고 있을 때(Y 속도가 양수일 때) Ground와의 충돌을 무시합니다.
@@ -478,8 +585,8 @@ public class PlayerMovement : MonoBehaviour
         }
         else // 아래로 내려가기 요청이 들어왔을 때
         {
-            // [로그 2-B] 이 로그가 보인다면, FixedUpdate가 dropRequested를 성공적으로 감지한 것입니다.
-            Debug.Log("<color=yellow>[FixedUpdate] 아래로 내려가기 처리 시작!</color>");
+            // [로그 2-B] 이 로그가 보인다면, FixedUpdate가 dropRequested를 성공적으로 감지한 것입니다.            
+            // Debug.Log("<color=yellow>[FixedUpdate] 아래로 내려가기 처리 시작!</color>");
             TeleportDown(); // 순간이동 방식으로 아래로 내려갑니다.
             dropRequested = false; // 요청을 처리했으므로 초기화
         }
@@ -503,7 +610,7 @@ public class PlayerMovement : MonoBehaviour
         // if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) verticalMoveInput -= 1f;
         verticalMoveInput = Mathf.Clamp(verticalMoveInput, -1f, 1f);
 
-        Debug.Log($"<color=magenta>PlayerMovement: FixedUpdate - 최종 horizontalMoveInput: {horizontalMoveInput}, externalHorizontalInput: {externalHorizontalInput}, verticalMoveInput: {verticalMoveInput}, externalVerticalInput: {externalVerticalInput}</color>");
+        
         HasHorizontalInput = (horizontalMoveInput != 0f || verticalMoveInput != 0f); // [추가] 수평 또는 수직 입력 상태 업데이트
         // [수정] 플레이어가 처음으로 움직였을 때 GameManager에 게임 시작을 알립니다.
         if ((horizontalMoveInput != 0f || verticalMoveInput != 0f) && GameManager.Instance != null && !GameManager.Instance.IsGameplayActive)
@@ -649,6 +756,69 @@ public class PlayerMovement : MonoBehaviour
     }
     
     /// <summary>
+    /// 엔딩 모드일 때의 FixedUpdate 로직을 처리합니다.
+    /// </summary>
+    private void HandleEndingMovementFixedUpdate()
+    {
+        // Disable FEZ-specific one-way platform logic
+        Physics.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Ground"), false); // Always allow collision
+
+        // WASD 입력 받기
+        float horizontalInput = Keyboard.current.aKey.isPressed ? -1f : (Keyboard.current.dKey.isPressed ? 1f : 0f);
+        float verticalInput = Keyboard.current.sKey.isPressed ? -1f : (Keyboard.current.wKey.isPressed ? 1f : 0f);
+
+        // 카메라의 forward와 right 벡터를 XZ 평면에 투영
+        Vector3 cameraForward = camRotation.transform.forward;
+        cameraForward.y = 0f;
+        cameraForward.Normalize();
+
+        Vector3 cameraRight = camRotation.transform.right;
+        cameraRight.y = 0f;
+        cameraRight.Normalize();
+
+        // 이동 방향 계산
+        currentMoveDirection = (cameraForward * verticalInput + cameraRight * horizontalInput).normalized;
+
+        // Rigidbody를 이용한 이동
+        if (currentMoveDirection.magnitude > 0.1f)
+        {
+            Vector3 targetVelocity = new Vector3(currentMoveDirection.x * speed, rb.linearVelocity.y, currentMoveDirection.z * speed);
+            rb.linearVelocity = targetVelocity;
+        }
+        else
+        {
+            if (isGrounded)
+            {
+                rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
+            }
+        }
+        // Apply jump force if requested
+        if (jumpRequested)
+        {
+            ApplyJumpForce();
+            jumpRequested = false;
+        }
+
+        // Apply fall/low jump multipliers
+        if (rb.linearVelocity.y < 0)
+        {
+            rb.linearVelocity += Vector3.up * Physics.gravity.y * (fallMultiplier - 1) * Time.deltaTime;
+        }
+        else if (rb.linearVelocity.y > 0)
+        {
+            rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.deltaTime;
+        }
+
+        // [수정] 플레이어가 처음으로 움직였을 때 GameManager에 게임 시작을 알립니다.
+        // 엔딩 모드에서는 게임 플레이 활성화 여부와 관계없이 움직일 수 있도록 합니다.
+        if ((horizontalInput != 0f || verticalInput != 0f) && GameManager.Instance != null && !GameManager.Instance.IsGameplayActive)
+        {
+            GameManager.Instance.StartGameplay(); // 이 부분은 엔딩 모드에서 필요 없을 수 있으나, GameManager의 다른 로직에 영향을 줄 수 있으므로 유지
+        }
+    }
+
+
+    /// <summary>
     /// 플레이어에게 점프력을 적용합니다. 외부 스크립트(예: JumpPad)에서 호출할 수 있습니다.
     /// </summary>
     /// <param name="forceMultiplier">기본 jumpForce에 곱할 배율입니다. 1f는 일반 점프입니다.</param>
@@ -657,7 +827,7 @@ public class PlayerMovement : MonoBehaviour
         if (isGrounded) // 바닥에 닿아있을 때만 점프 가능
         {
             rb.AddForce(Vector3.up * jumpForce * forceMultiplier, ForceMode.Impulse);
-            Debug.Log($"<color=blue>점프 발동! (Force Multiplier: {forceMultiplier})</color>");
+            
             if (animator != null) animator.SetTrigger("Jump"); // 점프 애니메이션 트리거
         }
     }
@@ -697,7 +867,7 @@ public class PlayerMovement : MonoBehaviour
 
         // 계산된 위치로 플레이어를 순간이동시킵니다.
         transform.position += teleportDirection * teleportDistance;
-        Debug.Log($"<color=cyan>[순간이동] {transform.position} 위치로 이동!</color>");
+        
     }
 
     /// <summary>
@@ -710,10 +880,10 @@ public class PlayerMovement : MonoBehaviour
         // 지정된 시간만큼 대기
         yield return new WaitForSeconds(duration);
         // '내려가는 중' 상태를 비활성화하여 모든 자동 붙이기 기능을 다시 켭니다.
-        isDropping = false;
+        isDropping = false;        
 
         // (디버그용) 기능이 다시 활성화되었음을 알림
-        Debug.Log("<color=green>발판 자동 붙이기 기능 다시 활성화.</color>");
+        // Debug.Log("<color=green>발판 자동 붙이기 기능 다시 활성화.</color>");
     }
 
     /// <summary>
@@ -765,7 +935,7 @@ public class PlayerMovement : MonoBehaviour
         rb.isKinematic = true; // 물리 엔진의 영향을 받지 않도록 설정
         rb.linearVelocity = Vector3.zero;
 
-        Debug.Log("<color=lightblue>벽 오르기 시작!</color>");
+        // Debug.Log("벽 오르기 시작!");
 
         // 여기에 "벽 잡는 애니메이션" 트리거를 넣으면 됩니다.
         // 예: animator.SetTrigger("GrabLedge");
@@ -791,7 +961,7 @@ public class PlayerMovement : MonoBehaviour
         isClimbing = false;
         rb.isKinematic = false; // 다시 물리 엔진의 영향을 받도록 설정
 
-        Debug.Log("<color=lightblue>벽 오르기 완료!</color>");
+        // Debug.Log("벽 오르기 완료!");
     }
 
     // 현재 카메라 뷰에 따른 '앞' 방향을 반환하는 헬퍼 함수
@@ -862,8 +1032,8 @@ public class PlayerMovement : MonoBehaviour
         if (newState != currentOcclusionState)
         {
             currentOcclusionState = newState;
-            Debug.Log($"[Visibility] 가려짐 상태 변경: {currentOcclusionState}"); // 상태 변경 로그 출력
             
+            // Debug.Log($"Occlusion State Changed: {currentOcclusionState}");
             switch (currentOcclusionState)
             {
                 case OcclusionState.Full:
@@ -978,7 +1148,7 @@ public class PlayerMovement : MonoBehaviour
     /// </summary>
     public void HandleDeath(string cause)
     {
-        Debug.LogWarning($"사망! 원인: {cause}");
+        // Debug.Log($"플레이어 사망! 원인: {cause}");
 
         // 초기 위치로 플레이어를 리스폰시킵니다.
         transform.position = initialPosition;
@@ -989,7 +1159,7 @@ public class PlayerMovement : MonoBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.Instance.GameOver();
-        }
+        }        
 
         // [추가] 사망 시 상호작용 관련 UI 및 상태를 초기화합니다.
         // ResetInteractionState(); // 이 함수는 이제 인라인됩니다.
@@ -1051,7 +1221,7 @@ public class PlayerMovement : MonoBehaviour
         if (sign != null)
         {
             currentInteractable = sign; // 상호작용 대상으로 설정
-            interactionPromptUI.SetActive(true); // "Z키" 프롬프트 UI 보이기
+            if (interactionPromptUI != null) interactionPromptUI.SetActive(true); // "Z키" 프롬프트 UI 보이기
         }
     }
 
@@ -1067,8 +1237,29 @@ public class PlayerMovement : MonoBehaviour
                 isReading = false;
                 narrationPanelUI.SetActive(false);
             }
-            currentInteractable = null; // 상호작용 대상 초기화
-            interactionPromptUI.SetActive(false); // "Z키" 프롬프트 UI 숨기기
+            currentInteractable = null; // 상호작용 대상 초기화            
+            if (interactionPromptUI != null) interactionPromptUI.SetActive(false); // "Z키" 프롬프트 UI 숨기기
+        }
+    }
+
+    /// <summary>
+    /// 다른 오브젝트의 일반 콜라이더와 충돌했을 때 호출됩니다.
+    /// </summary>
+    /// <param name="collision">충돌 정보</param>
+    private void OnCollisionEnter(Collision collision)
+    {
+        // 1. 엔딩 블록 레이어 감지
+        // (endingBlockLayer.value & (1 << collision.gameObject.layer)) != 0
+        if (!hasTriggeredEnding && ((1 << collision.gameObject.layer) & endingBlockLayer) != 0)
+        {
+            // Debug.Log($"<color=green>Player hit Ending Block at position: {transform.position}</color>");
+            // Debug.Log($"<color=green>플레이어가 엔딩 블록 레이어에 닿았습니다! 엔딩 시퀀스 시작.</color>");
+            if (GameManager.Instance != null && !GameManager.Instance.IsGamePaused)
+            {
+                hasTriggeredEnding = true; // 엔딩이 트리거되었음을 표시
+                GameManager.Instance.StartEndingSequence();
+                // 엔딩이 시작되면 더 이상 다른 충돌 처리는 무시할 수 있습니다.
+            }
         }
     }
 
@@ -1119,7 +1310,7 @@ public class PlayerMovement : MonoBehaviour
             
             // Animator에 파라미터 전달 (Animator에 "JumpSpeed" 파라미터가 있어야 함)
             animator.SetFloat("JumpSpeed", jumpSpeedMultiplier);
-            Debug.Log($"[Jump Sync] 물리 시간: {totalJumpTime:F2}s, 애니메이션: {animationLength:F2}s, 배수: {jumpSpeedMultiplier:F2}");
+            
         }
     }
 }

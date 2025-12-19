@@ -14,7 +14,6 @@ public class CameraRotation : MonoBehaviour
     public CameraView currentView = CameraView.Front;
 
     public bool IsRotating { get; private set; } // 외부에서 현재 회전 중인지 확인할 수 있는 프로퍼티
-
     private Quaternion targetRotation; // 목표 회전값
     private Quaternion playerTargetRotation; // 플레이어의 목표 회전값
     private int viewIndex = 0; // 현재 뷰 인덱스 (0:Front, 1:Right, 2:Back, 3:Left)
@@ -28,6 +27,28 @@ public class CameraRotation : MonoBehaviour
     [Tooltip("카메라와 플레이어 사이의 거리를 조절합니다. 1f가 기본 거리입니다.")]
     public float cameraDistanceMultiplier = 1f; // 카메라 거리 배율
     private Vector3 initialOffsetDirection; // 플레이어와 카메라 사이의 초기 오프셋 방향
+    public float additionalVerticalOffset { get; set; } = 0f; // GameManager에서 설정할 추가적인 수직 오프셋
+
+    // 엔딩 모드 카메라 설정을 위한 필드
+    [Header("Ending Camera Configuration")]
+    [Tooltip("엔딩 모드에서 카메라가 플레이어로부터 떨어질 로컬 오프셋입니다. (플레이어 기준)")]
+    public Vector3 endingCameraOffsetFromTarget = new Vector3(0, 10, -5); // 예시: 플레이어 위 10, 뒤 5
+    [Tooltip("엔딩 모드에서 카메라가 플레이어를 바라볼 로컬 회전입니다. (플레이어 기준)")]
+    public Vector3 endingCameraLookAtEuler = new Vector3(60, 0, 0); // 예시: X축 60도 회전 (아래를 바라봄)
+
+    // 엔딩 모드인지 여부 (커스텀 setter를 통해 엔딩 카메라 상태 계산)
+    private bool _isInEndingMode = false;
+    public bool IsInEndingMode
+    {
+        get { return _isInEndingMode; }
+        set
+        {
+            if (_isInEndingMode != value)
+            {
+                _isInEndingMode = value;
+            }
+        }
+    }
     private float initialOffsetMagnitude; // 플레이어와 카메라 사이의 초기 오프셋 거리
     private PlayerMovement playerMovement; // 플레이어 이동 스크립트 참조
 
@@ -36,7 +57,7 @@ public class CameraRotation : MonoBehaviour
     {
         if (target == null)
         {
-            Debug.LogError("카메라의 Target(플레이어)이 설정되지 않았습니다!");
+            // Debug.LogError("CameraRotation: Target (Player) is not assigned in the Inspector!");
             enabled = false; // 스크립트 비활성화
             return;
         }
@@ -44,13 +65,12 @@ public class CameraRotation : MonoBehaviour
         playerMovement = target.GetComponent<PlayerMovement>();
         if (playerMovement == null)
         {
-            Debug.LogError("플레이어에서 PlayerMovement 스크립트를 찾을 수 없습니다!");
+            // Debug.LogError($"CameraRotation: PlayerMovement component not found on target '{target.name}'!");
             enabled = false;
             return;
         }
 
         // 시작할 때의 상태를 저장합니다.
-        initialCameraRotation = transform.rotation;
         initialPlayerRotation = target.rotation;
         initialViewIndex = viewIndex;
         
@@ -58,6 +78,8 @@ public class CameraRotation : MonoBehaviour
         Vector3 initialRelativePosition = transform.position - target.position;
         initialOffsetDirection = initialRelativePosition.normalized;
         initialOffsetMagnitude = initialRelativePosition.magnitude;
+        initialCameraRotation = transform.rotation; // 초기 카메라 회전은 LateUpdate에서 사용될 수 있으므로 Start에서 저장
+        
         targetRotation = initialCameraRotation;
         playerTargetRotation = initialPlayerRotation;
         UpdateCurrentView();
@@ -66,7 +88,7 @@ public class CameraRotation : MonoBehaviour
     void Update()
     {
         // [수정] 게임 오버 UI가 활성화되어 있으면 카메라 회전 입력을 무시합니다.
-        if (GameManager.Instance != null && GameManager.Instance.IsGamePaused)
+        if ((GameManager.Instance != null && GameManager.Instance.IsGamePaused) || IsInEndingMode)
         {
             return;
         }
@@ -97,10 +119,28 @@ public class CameraRotation : MonoBehaviour
     void LateUpdate()
     {
         if (target == null) return;
+        
+        // 엔딩 모드일 경우, 일반적인 카메라 이동 및 회전 로직을 건너뜁니다.
+        // (엔딩 모드에서의 카메라 동작은 별도로 처리되거나 이 스크립트 외부에서 제어될 수 있습니다.)
+        if (IsInEndingMode)
+        {
+            if (target == null)
+            {
+                // Debug.LogError("CameraRotation: target is null in ending mode! Cannot set camera position. Camera might be at (0,0,0) if no other system updates it.");
+                return;
+            }
+            
+            Vector3 calculatedPosition = target.position + target.rotation * endingCameraOffsetFromTarget;
+            Quaternion calculatedRotation = target.rotation * Quaternion.Euler(endingCameraLookAtEuler);
+            // 엔딩 모드에서는 플레이어 기준의 탑뷰 위치와 회전을 적용합니다.
+            transform.position = target.position + target.rotation * endingCameraOffsetFromTarget;
+            transform.rotation = target.rotation * Quaternion.Euler(endingCameraLookAtEuler);
+            return;
+        }
 
         // 1. 목표 회전값을 적용하여 플레이어로부터 얼마나 떨어져야 할지 목표 위치 계산
         Vector3 currentOffset = initialOffsetDirection * (initialOffsetMagnitude * cameraDistanceMultiplier);
-        Vector3 desiredPosition = target.position + (targetRotation * currentOffset);
+        Vector3 desiredPosition = target.position + (targetRotation * currentOffset) + Vector3.up * additionalVerticalOffset; // 추가적인 수직 오프셋 적용
 
         // 2. 현재 위치에서 목표 위치로 부드럽게 이동 (Lerp)
         transform.position = Vector3.Lerp(transform.position, desiredPosition, rotationSpeed * Time.deltaTime);
@@ -125,25 +165,28 @@ public class CameraRotation : MonoBehaviour
     // 현재 뷰 상태를 업데이트하고 로그를 출력하는 함수
     void UpdateCurrentView()
     {
-        currentView = views[viewIndex];
-        Debug.Log("Current Camera View: " + currentView);
+        currentView = views[viewIndex];        
+        
     }
 
     /// <summary>
     /// 카메라와 플레이어의 회전을 초기 상태로 리셋합니다.
     /// </summary>
     public void ResetCamera()
-    {
-        Debug.Log("카메라 위치와 회전을 초기화합니다.");
-
+    {        
+        
+        // Debug.Log("카메라 초기화 중...");
         // 내부 상태 변수들을 초기값으로 되돌립니다.
         viewIndex = initialViewIndex;
         targetRotation = initialCameraRotation;
         playerTargetRotation = initialPlayerRotation;
+        additionalVerticalOffset = 0f; // 추가적인 수직 오프셋 초기화 (일반 모드용)
+        cameraDistanceMultiplier = 1f; // 카메라 거리 배율 초기화 (일반 모드용)
+        IsInEndingMode = false; // 엔딩 모드 해제
 
         // 카메라와 플레이어의 위치/회전을 즉시 초기 상태로 설정합니다. (조절된 거리 적용)
         Vector3 resetOffset = initialOffsetDirection * (initialOffsetMagnitude * cameraDistanceMultiplier);
-        transform.position = target.position + (initialCameraRotation * resetOffset);
+        transform.position = target.position + (initialCameraRotation * resetOffset) + Vector3.up * additionalVerticalOffset;
         transform.rotation = initialCameraRotation;
         target.rotation = initialPlayerRotation;
         UpdateCurrentView();

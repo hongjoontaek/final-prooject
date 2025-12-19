@@ -7,6 +7,8 @@ TagManager:
   - New tag
   - Ground
   - GameOverUI
+  - EndingUI
+  - ControlsUI
   layers:
   - Default
   - TransparentFX
@@ -18,7 +20,7 @@ TagManager:
   - wall
   - Player
   - Lava
-  - 
+  - EndingBlock
   - 
   - 
   - 
